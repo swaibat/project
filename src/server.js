@@ -6,7 +6,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { handleWebSocketConnection } from './websocket/wsHandler.js';
 import { gameRoutes } from './routes/gameRoutes.js';
-
+import router from './routes/index.js';
 
 dotenv.config();
 
@@ -18,17 +18,62 @@ const wss = new WebSocketServer({ server });
 app.use(cors());
 app.use(express.json());
 
+// Store active connections with user mapping
+const activeConnections = new Map(); // userId -> WebSocket
+
+// Middleware to make WebSocket functions available in routes
+app.use((req, res, next) => {
+  req.sendToUser = (userId, message) => {
+    const ws = activeConnections.get(userId);
+    if (ws && ws.readyState === ws.OPEN) {
+      ws.send(JSON.stringify(message));
+    }
+  };
+  req.broadcast = (message) => {
+    activeConnections.forEach((ws) => {
+      if (ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify(message));
+      }
+    });
+  };
+  next();
+});
+
+// WebSocket connection handler
+wss.on('connection', (ws) => {
+  handleWebSocketConnection(ws);
+  ws.on('message', (message) => {
+    try {
+      const data = JSON.parse(message);
+      if (data.type === 'IDENTIFY' && data.playerId) {
+        // Map user ID to WebSocket connection
+        activeConnections.set(data.playerId, ws);
+        ws.userId = data.playerId;
+      }
+    } catch (error) {
+      console.error('Error processing WebSocket message:', error);
+    }
+  });
+
+  ws.on('close', () => {
+    if (ws.userId) {
+      activeConnections.delete(ws.userId);
+    }
+  });
+});
+
 // MongoDB Connection
 
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/matatu')
+mongoose
+  .connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/matatu')
   .then(() => console.log('Connected to MongoDB'))
-  .catch(err => console.error('MongoDB connection error:', err));
+  .catch((err) => console.error('MongoDB connection error:', err));
 
 // Routes
-app.use('/api/games', gameRoutes);
+app.use('/api', router);
 
 // WebSocket Connection Handler
-wss.on('connection', handleWebSocketConnection);
+// wss.on('connection', (ws) => handleWebSocketConnection(ws));
 
 // Basic health check route
 app.get('/health', (req, res) => {

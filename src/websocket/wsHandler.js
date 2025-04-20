@@ -1,15 +1,14 @@
 // WebSocketHandler.js
 import { WebSocketMessageType } from '../types/messageTypes.js';
-import { GameState } from '../models/GameState.js';
 import { initializeDeck } from '../utils/cardUtils.js';
 import { generateId, notifyExpiry } from './wsUtil.js';
 import { createBotPlayer, startBotGame } from '../bots/botManager.js';
-// import { createBotPlayer, startBotGame } from './botPlayer';
 
-const clients = new Map();
-global.clients = clients;
-
-const pendingRequests = new Map();
+// In-memory stores
+const clients = new Map(); // playerId -> WebSocket
+const pendingRequests = new Map(); // requestId -> requestData
+const gameStates = new Map(); // gameId -> gameState
+const playerGameMap = new Map(); // playerId -> gameId
 
 export const handleWebSocketConnection = (ws) => {
   console.log('New client connected');
@@ -49,10 +48,13 @@ export const handleWebSocketConnection = (ws) => {
         case WebSocketMessageType.GAME_REQUEST_DECLINED:
           await handleGameRequestDeclined(ws, data);
           break;
+        case WebSocketMessageType.ONLINE_USERS:
+          await handleOnlineUsersRequest(ws);
+          break;
         default:
           console.warn(`Unknown message type: ${data.type}`);
           ws.send(
-            JSON.stringify({ type: 'ERROR', message: 'Unknown message type' })
+            JSON.stringify({ type: 'ERROR', message: 'Unknown message type' }),
           );
       }
     } catch (error) {
@@ -66,37 +68,62 @@ export const handleWebSocketConnection = (ws) => {
   });
 };
 
-const handleIdentify = async (ws, data) => {
-  const { playerId } = data.data;
-  clients.set(playerId, ws);
+const handleIdentify = async (ws, { data }) => {
+  const { playerId, username } = data;
+
+  console.log('====================================');
+  console.log(data);
+  console.log('====================================');
+
+  // Check if player is already in a game
+  if (playerGameMap.has(playerId)) {
+    const gameId = playerGameMap.get(playerId);
+    const gameState = gameStates.get(gameId);
+
+    if (gameState) {
+      ws.send(
+        JSON.stringify({
+          type: WebSocketMessageType.IDENTIFY,
+          gameState,
+        }),
+      );
+
+      clients.set(playerId, { ws, username });
+      ws.playerId = playerId;
+      console.log(`Player ${playerId} reconnected to existing game ${gameId}`);
+      await broadcastOnlineUsers();
+      return;
+    } else {
+      // Clean up orphaned mapping
+      playerGameMap.delete(playerId);
+    }
+  }
+
+  // New player with no existing games
+  clients.set(playerId, { ws, username });
   ws.playerId = playerId;
 
-  broadcastOnlineUsers();
-
-  await GameState.find({});
-
-  const toPlayerWs = clients.get(playerId);
-
-  toPlayerWs.send(
+  ws.send(
     JSON.stringify({
       type: WebSocketMessageType.IDENTIFY,
-      expiresAt: Date.now() + 10000,
-    })
+    }),
   );
 
-  console.log(data, `Player ${playerId} identified`);
+  console.log(`Player ${playerId} identified with no active games`);
+  await broadcastOnlineUsers();
 };
 
 const handleGameStart = async (ws, data) => {
   const { gameId } = data;
-  const gameState = await GameState.findOne({ gameId });
+  const gameState = gameStates.get(gameId);
 
   if (!gameState) {
     ws.send(JSON.stringify({ type: 'ERROR', message: 'Game not found' }));
     return;
   }
 
-  await GameState.updateOne({ gameId }, { $set: { status: 'PLAYING' } });
+  gameState.status = 'PLAYING';
+  gameStates.set(gameId, gameState);
 
   broadcastToGame(gameId, {
     type: WebSocketMessageType.START,
@@ -104,96 +131,51 @@ const handleGameStart = async (ws, data) => {
   });
 };
 
-const handleMove = async (ws, data) => {
-  const { gameId, playerId, card, chosenSuit } = data;
-  const gameState = await GameState.findOne({ gameId });
+const handleMove = async (ws, { data }) => {
+  const { to, from } = data;
+  const toPlayer = clients.get(to);
 
-  if (!gameState || gameState.currentTurn !== playerId) {
-    ws.send(JSON.stringify({ type: 'ERROR', message: 'Invalid move' }));
-    return;
+  if (toPlayer) {
+    toPlayer.ws.send(
+      JSON.stringify({
+        type: WebSocketMessageType.MOVE,
+        data,
+      }),
+    );
   }
-
-  const playerHand = gameState.players.get(playerId);
-  const cardIndex = playerHand.findIndex((c) => c.id === card.id);
-
-  if (cardIndex === -1) {
-    ws.send(JSON.stringify({ type: 'ERROR', message: 'Card not in hand' }));
-    return;
-  }
-
-  playerHand.splice(cardIndex, 1);
-  gameState.playedCards.push({ ...card, type: 'played' });
-  gameState.currentCard = card;
-
-  if (chosenSuit) {
-    gameState.chosenSuit = chosenSuit;
-  }
-
-  const playerIds = Array.from(gameState.players.keys());
-  const currentPlayerIndex = playerIds.indexOf(playerId);
-  const nextPlayerIndex = (currentPlayerIndex + 1) % playerIds.length;
-  gameState.currentTurn = playerIds[nextPlayerIndex];
-
-  await gameState.save();
-  broadcastToGame(gameId, {
-    type: WebSocketMessageType.MOVE,
-    gameState,
-  });
 };
 
-const handleDraw = async (ws, data) => {
-  const { gameId, playerId } = data;
-  const gameState = await GameState.findOne({ gameId });
+const handleDraw = async (ws, { data }) => {
+  const { to } = data;
+  const toPlayer = clients.get(to);
 
-  if (!gameState || gameState.currentTurn !== playerId) {
-    ws.send(JSON.stringify({ type: 'ERROR', message: 'Invalid draw' }));
-    return;
+  if (toPlayer) {
+    toPlayer.ws.send(
+      JSON.stringify({
+        type: WebSocketMessageType.DRAW,
+        data,
+      }),
+    );
   }
-
-  const card = gameState.deck.pop();
-  if (!card) {
-    gameState.deck = gameState.playedCards
-      .slice(0, -1)
-      .map((c) => ({ ...c, type: 'pile' }));
-    gameState.playedCards = [
-      gameState.playedCards[gameState.playedCards.length - 1],
-    ];
-  }
-
-  const playerHand = gameState.players.get(playerId);
-  playerHand.push({ ...card, type: 'player' });
-
-  await gameState.save();
-  broadcastToGame(gameId, {
-    type: WebSocketMessageType.DRAW,
-    gameState,
-  });
 };
 
-const handleSkip = async (ws, data) => {
-  const { gameId, playerId } = data;
-  const gameState = await GameState.findOne({ gameId });
+const handleSkip = async (ws, { data }) => {
+  const { to, from } = data;
+  const toPlayer = clients.get(to);
 
-  if (!gameState || gameState.currentTurn !== playerId) {
-    ws.send(JSON.stringify({ type: 'ERROR', message: 'Invalid skip' }));
-    return;
+  if (toPlayer) {
+    toPlayer.ws.send(
+      JSON.stringify({
+        type: WebSocketMessageType.SKIP,
+        data,
+      }),
+    );
   }
-
-  const playerIds = Array.from(gameState.players.keys());
-  const currentPlayerIndex = playerIds.indexOf(playerId);
-  const nextPlayerIndex = (currentPlayerIndex + 1) % playerIds.length;
-  gameState.currentTurn = playerIds[nextPlayerIndex];
-
-  await gameState.save();
-  broadcastToGame(gameId, {
-    type: WebSocketMessageType.SKIP,
-    gameState,
-  });
 };
 
 const handleWin = async (ws, data) => {
   const { gameId, playerId } = data;
-  const gameState = await GameState.findOne({ gameId });
+  const gameState = gameStates.get(gameId);
 
   if (!gameState) {
     ws.send(JSON.stringify({ type: 'ERROR', message: 'Game not found' }));
@@ -202,7 +184,12 @@ const handleWin = async (ws, data) => {
 
   gameState.winner = playerId;
   gameState.status = 'COMPLETED';
-  await gameState.save();
+  gameStates.set(gameId, gameState);
+
+  // Clean up player-game mappings
+  for (const player of gameState.players.keys()) {
+    playerGameMap.delete(player);
+  }
 
   broadcastToGame(gameId, {
     type: WebSocketMessageType.WIN,
@@ -212,55 +199,19 @@ const handleWin = async (ws, data) => {
 
 const handleGameRequest = async (ws, data) => {
   const { from, to, username } = data.data;
-  console.log(data);
 
-  if (to === 'BOT') {
-    const gameId = generateId();
-    const bot = createBotPlayer(gameId);
-    await startBotGame(from, gameId);
-
-    const { deck, playerHands, cuttingCard } = initializeDeck([from, bot.playerId]);
-    const gameState = new GameState({
-      players: playerHands,
-      status: 'ACTIVE',
-      userId: from,
-      currentTurn: from,
-      cuttingCard,
-      deck,
-      playedCards: [],
-      currentCard: null,
-      chosenSuit: null,
-    });
-
-    await gameState.save();
-
-    const fromPlayerWs = clients.get(from);
-    if (fromPlayerWs) {
-      fromPlayerWs.send(
-        JSON.stringify({
-          type: WebSocketMessageType.GAME_REQUEST_ACCEPTED,
-          gameId: gameState.gameId,
-          gameState,
-        })
-      );
-    }
-
-    const botWs = clients.get(bot.playerId);
-    if (botWs) {
-      botWs.send(
-        JSON.stringify({
-          type: WebSocketMessageType.GAME_REQUEST_ACCEPTED,
-          gameId: gameState.gameId,
-          gameState,
-        })
-      );
-    }
-
-    console.log(`Bot game started (ID: ${gameId})`);
+  // Check if either player is already in a game
+  if (playerGameMap.has(from) || playerGameMap.has(to)) {
+    ws.send(
+      JSON.stringify({
+        type: 'ERROR',
+        message: 'One or both players are already in a game',
+      }),
+    );
     return;
   }
 
-  const toPlayerWs = clients.get(to);
+  const toPlayer = clients.get(to);
   const requestId = generateId();
   const expiryTimeout = setTimeout(() => {
     pendingRequests.delete(requestId);
@@ -274,8 +225,8 @@ const handleGameRequest = async (ws, data) => {
     timeout: expiryTimeout,
   });
 
-  if (toPlayerWs) {
-    toPlayerWs.send(
+  if (toPlayer) {
+    toPlayer.ws.send(
       JSON.stringify({
         type: WebSocketMessageType.GAME_REQUEST,
         requestId,
@@ -283,14 +234,14 @@ const handleGameRequest = async (ws, data) => {
         from,
         to,
         expiresAt: Date.now() + 10000,
-      })
+      }),
     );
   }
 
   console.log(`Game request sent (ID: ${requestId})`);
 };
 
-const handleGameRequestAccepted = async (ws, data) => {
+const handleGameRequestAccepted = async (ws, { data }) => {
   const { requestId } = data;
   const request = pendingRequests.get(requestId);
 
@@ -299,7 +250,7 @@ const handleGameRequestAccepted = async (ws, data) => {
       JSON.stringify({
         type: 'ERROR',
         message: 'Request expired or invalid',
-      })
+      }),
     );
     return;
   }
@@ -309,21 +260,34 @@ const handleGameRequestAccepted = async (ws, data) => {
 
   const { from, to } = request;
 
-  const fromPlayerWs = clients.get(from);
-  const toPlayerWs = clients.get(to);
+  // Double check players aren't in other games (race condition)
+  if (playerGameMap.has(from) || playerGameMap.has(to)) {
+    ws.send(
+      JSON.stringify({
+        type: 'ERROR',
+        message: 'One or both players are already in a game',
+      }),
+    );
+    return;
+  }
 
-  if (!fromPlayerWs || !toPlayerWs) {
+  const fromPlayer = clients.get(from);
+  const toPlayer = clients.get(to);
+
+  if (!fromPlayer || !toPlayer) {
     ws.send(
       JSON.stringify({
         type: 'ERROR',
         message: 'One or both players disconnected',
-      })
+      }),
     );
     return;
   }
 
   const { deck, playerHands, cuttingCard } = initializeDeck([from, to]);
-  const gameState = new GameState({
+  const gameId = generateId();
+  const gameState = {
+    gameId,
     players: playerHands,
     status: 'ACTIVE',
     userId: from,
@@ -333,17 +297,22 @@ const handleGameRequestAccepted = async (ws, data) => {
     playedCards: [],
     currentCard: null,
     chosenSuit: null,
-  });
+    createdAt: new Date(),
+  };
 
-  await gameState.save();
+  // Update player-game mappings
+  playerGameMap.set(from, gameId);
+  playerGameMap.set(to, gameId);
+  gameStates.set(gameId, gameState);
 
   const response = {
     type: WebSocketMessageType.GAME_REQUEST_ACCEPTED,
-    gameId: gameState.gameId,
+    gameId,
     gameState,
   };
-  fromPlayerWs.send(JSON.stringify(response));
-  toPlayerWs.send(JSON.stringify(response));
+
+  fromPlayer.ws.send(JSON.stringify(response));
+  toPlayer.ws.send(JSON.stringify(response));
 };
 
 const handleGameRequestDeclined = async (ws, data) => {
@@ -355,48 +324,70 @@ const handleGameRequestDeclined = async (ws, data) => {
   clearTimeout(request.timeout);
   pendingRequests.delete(requestId);
 
-  const senderWs = clients.get(request.from);
-  if (senderWs) {
-    senderWs.send(
+  const sender = clients.get(request.from);
+  if (sender) {
+    sender.ws.send(
       JSON.stringify({
         type: WebSocketMessageType.GAME_REQUEST_DECLINED,
         to: request.to,
         from: request.from,
-      })
+      }),
     );
   }
+};
+
+const handleOnlineUsersRequest = async (ws) => {
+  const onlineUsers = Array.from(clients.entries()).map(([playerId, { username }]) => ({
+    playerId,
+    username,
+  }));
+
+  console.log('onlineUsers', onlineUsers);
+  
+
+  ws.send(
+    JSON.stringify({
+      type: WebSocketMessageType.ONLINE_USERS,
+      users: onlineUsers,
+    }),
+  );
 };
 
 const handleDisconnect = async (ws) => {
   if (ws.playerId) {
     clients.delete(ws.playerId);
-    broadcastOnlineUsers();
     console.log(`Player ${ws.playerId} disconnected`);
+    await broadcastOnlineUsers();
+    // Note: We don't remove from playerGameMap here to allow reconnection
   }
 };
 
 const broadcastOnlineUsers = async () => {
-  // const onlineUsers = await User.find({ isOnline: true }).select('username _id');
-  // const message = JSON.stringify({
-  //   type: 'ONLINE_USERS',
-  //   users: onlineUsers,
-  // });
-  // for (const client of clients.values()) {
-  //   client.send(message);
-  // }
+  const onlineUsers = Array.from(clients.entries()).map(([playerId, { username }]) => ({
+    playerId,
+    username,
+  }));
+
+  const message = JSON.stringify({
+    type: WebSocketMessageType.ONLINE_USERS,
+    users: onlineUsers,
+  });
+
+  for (const [, { ws }] of clients) {
+    ws.send(message);
+  }
 };
 
 const broadcastToGame = (gameId, message) => {
-  GameState.findOne({ gameId }).then((gameState) => {
-    if (!gameState) return;
+  const gameState = gameStates.get(gameId);
+  if (!gameState) return;
 
-    for (const playerId of gameState.players.keys()) {
-      const clientWs = clients.get(playerId);
-      if (clientWs) {
-        clientWs.send(JSON.stringify(message));
-      }
+  for (const playerId of gameState.players.keys()) {
+    const client = clients.get(playerId);
+    if (client) {
+      client.ws.send(JSON.stringify(message));
     }
-  });
+  }
 };
 
 export {
@@ -410,6 +401,7 @@ export {
   handleGameRequestAccepted,
   handleGameRequestDeclined,
   handleDisconnect,
+  handleOnlineUsersRequest,
   broadcastOnlineUsers,
   broadcastToGame,
 };

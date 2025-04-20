@@ -1,41 +1,59 @@
-// src/game/gameHandler.ts
-// import { activeBots } from '@/bot/botManager';
-
 import { WebSocketMessageType } from "../types/messageTypes";
 
-export const updateGameState = async (gameState) => {
-  // Save updated state
-  await gameState.save();
-  
-  // Notify all players (including bots)
-  for (const [playerId] of gameState.players) {
-    const isBot = activeBots.has(playerId);
-    const message = {
-      type: WebSocketMessageType.GAME_STATE_UPDATE,
-      gameState,
-      isYourTurn: gameState.currentTurn === playerId
-    };
-    
-    if (isBot) {
-      // Send directly to bot's message handler
-      activeBots.get(playerId)?.ws.emit('message', JSON.stringify(message));
-    } else {
-      // Send to real player via WebSocket
-      const playerWs = getPlayerWebSocket(playerId);
-      playerWs?.send(JSON.stringify(message));
-    }
-    
-    if (gameState.currentTurn === playerId) {
-      const turnMessage = {
-        type: WebSocketMessageType.YOUR_TURN,
-        gameState
-      };
-      
-      if (isBot) {
-        activeBots.get(playerId)?.ws.emit('message', JSON.stringify(turnMessage));
-      } else {
-        playerWs?.send(JSON.stringify(turnMessage));
+export const handleWebSocketConnection = (ws) => {
+  console.log('New client connected');
+
+  ws.on('message', async (message) => {
+    try {
+      const data = JSON.parse(message);
+
+      switch (data.type) {
+        case WebSocketMessageType.IDENTIFY:
+          await handleIdentify(ws, data);
+          break;
+        case WebSocketMessageType.START:
+          await handleGameStart(ws, data);
+          break;
+        case WebSocketMessageType.MOVE:
+          await handleMove(ws, data);
+          break;
+        case WebSocketMessageType.DRAW:
+          await handleDraw(ws, data);
+          break;
+        case WebSocketMessageType.SKIP:
+          await handleSkip(ws, data);
+          break;
+        case WebSocketMessageType.WIN:
+          await handleWin(ws, data);
+          break;
+        case WebSocketMessageType.PING:
+          ws.send(JSON.stringify({ type: 'PONG' }));
+          break;
+        case WebSocketMessageType.GAME_REQUEST:
+          await handleGameRequest(ws, data);
+          break;
+        case WebSocketMessageType.GAME_REQUEST_ACCEPTED:
+          await handleGameRequestAccepted(ws, data);
+          break;
+        case WebSocketMessageType.GAME_REQUEST_DECLINED:
+          await handleGameRequestDeclined(ws, data);
+          break;
+        case WebSocketMessageType.ONLINE_USERS:
+          await handleOnlineUsersRequest(ws);
+          break;
+        default:
+          console.warn(`Unknown message type: ${data.type}`);
+          ws.send(
+            JSON.stringify({ type: 'ERROR', message: 'Unknown message type' }),
+          );
       }
+    } catch (error) {
+      console.error('Error handling message:', error);
+      ws.send(JSON.stringify({ type: 'ERROR', message: error.message }));
     }
-  }
+  });
+
+  ws.on('close', () => {
+    handleDisconnect(ws);
+  });
 };
