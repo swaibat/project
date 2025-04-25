@@ -3,52 +3,36 @@ import User from '../models/User.js';
 
 export const depositApi = async ({
   amount,
-  infoMessage,
   provider,
   transactionId,
 }) => {
   try {
-    // Find the transaction by internal_reference
-    const transaction = await Transaction.findOne({
-      internal_reference: transactionId,
-    }).populate('user');
+    // Find and update transaction status to SUCCESS in one go
+    const transaction = await Transaction.findOneAndUpdate(
+      { transactionId },
+      { status: 'SUCCESS', provider },
+      { new: true }
+    );
 
     if (!transaction) {
       throw new Error('Transaction not found');
     }
 
-    // Update user balance (example - adjust according to your logic)
-    const user = await User.findByIdAndUpdate(
-      transaction.user._id,
+    // Update user balance
+    const user = await User.findOneAndUpdate(
+      { uid: transaction.userUID },
       { $inc: { balance: amount } },
-      { new: true },
+      { new: true }
     );
 
-    // Update transaction status
-    const updatedTransaction = await Transaction.findOneAndUpdate(
-      { internal_reference: transactionId },
-      {
-        status: 'SUCCESS',
-        provider,
-      },
-      { new: true },
-    );
-
-    return {
-      success: true,
-      userId: user.uid,
-      accountId: user.accountId,
-      transaction: updatedTransaction,
-    };
+    return transaction;
   } catch (error) {
     console.error('Deposit processing error:', error);
 
-    // Mark transaction as failed
+    // Best effort: mark transaction as failed (only if it exists)
     await Transaction.findOneAndUpdate(
-      { internal_reference: transactionId },
-      {
-        status: 'FAILED',
-      },
+      { transactionId },
+      { status: 'FAILED' }
     );
 
     throw error;
@@ -56,18 +40,13 @@ export const depositApi = async ({
 };
 
 export const depositFailed = async ({
-  internal_reference,
-  message,
+  transactionId,
   provider,
 }) => {
   try {
-    console.log(
-      '====internal_reference=====',
-      internal_reference,
-    );
-    
+
     const transaction = await Transaction.findOneAndUpdate(
-      { internal_reference },
+      { transactionId },
       {
         status: 'FAILED',
         provider,
@@ -79,12 +58,7 @@ export const depositFailed = async ({
       throw new Error('Transaction not found');
     }
 
-    return {
-      success: false,
-      userId: transaction.user?.uid,
-      accountId: transaction.user?.accountId,
-      transaction,
-    };
+    return transaction;
   } catch (error) {
     console.log('=====', error);
     // throw error;

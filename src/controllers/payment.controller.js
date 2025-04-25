@@ -1,8 +1,7 @@
-import { mobileMoneyPayment } from '../utils/payments.js';
+import { mobileMoneyPayment, sendPayment } from '../utils/payments.js';
 import { depositApi, depositFailed } from '../utils/depositApi.js';
 import { WebSocketMessageType } from '../types/messageTypes.js';
 import { sendPushNotification } from '../utils/pushNotifications.js';
-
 
 export const processDeposit = async (req, res) => {
   try {
@@ -19,17 +18,29 @@ export const processDeposit = async (req, res) => {
   }
 };
 
+export const withdrawMoney = async (req, res) => {
+  try {
+    const { amount } = req.body;
+
+    const data = await sendPayment(req.params.uid, {
+      amount,
+    });
+    return res.status(200).send({ status: 200, data });
+  } catch (error) {
+    return res
+      .status(422)
+      .send({ status: 422, error: 'Unable to process your transaction' });
+  }
+};
+
 export const handlePaymentWebhook = async (req, res) => {
   const {
     status,
     message,
     customer_reference,
     internal_reference,
-    msisdn,
     amount,
-    currency,
     provider,
-    charge,
   } = req.body;
 
   try {
@@ -38,44 +49,38 @@ export const handlePaymentWebhook = async (req, res) => {
         amount,
         infoMessage: message,
         provider,
-        transactionId: internal_reference,
+        transactionId: customer_reference,
       });
 
-      if (depositResult?.userId) {
-        await sendTransactionNotification(req, depositResult.userId, {
+      if (depositResult?.userUID) {
+        await sendTransactionNotification(req, depositResult.userUID, {
           type: WebSocketMessageType.TRANSACTION_COMPLETED,
-          accountId: depositResult.accountId,
+          accountId: depositResult.userUID,
           amount,
-          transactionId: internal_reference,
+          transactionId: customer_reference,
           timestamp: new Date().toISOString(),
-          message: 'Transaction completed successfully',
-          title: 'Transaction Successful',
-          data: {
-            type: 'transaction',
-            transactionId: internal_reference,
-            amount,
-            currency,
-          },
+          message: `You have added UGX ${amount.toLocaleString()} to your Matatu Wallet`,
+          title: `You've got money!`,
         });
       }
     } else {
       const failureResult = await depositFailed({
-        internal_reference,
+        transactionId: customer_reference,
         message,
         provider,
       });
 
-      if (failureResult?.userId) {
-        await sendTransactionNotification(req, failureResult.userId, {
+      if (failureResult?.userUID) {
+        await sendTransactionNotification(req, failureResult.userUID, {
           type: WebSocketMessageType.TRANSACTION_FAILED,
-          transactionId: internal_reference,
+          transactionId: customer_reference,
           reason: message,
           timestamp: new Date().toISOString(),
-          message: `Transaction failed: ${message}`,
-          title: 'Transaction Failed',
+          message: "Your payment didn’t go through. Try again.",
+          title: 'Deposit Failed!',
           data: {
             type: 'transaction',
-            transactionId: internal_reference,
+            transactionId: customer_reference,
             reason: message,
           },
         });
@@ -89,7 +94,7 @@ export const handlePaymentWebhook = async (req, res) => {
     if (customer_reference) {
       await sendTransactionNotification(req, customer_reference, {
         type: WebSocketMessageType.TRANSACTION_FAILED,
-        transactionId: internal_reference,
+        transactionId: customer_reference,
         reason: 'Internal server error processing transaction',
         timestamp: new Date().toISOString(),
         message: 'Internal server error processing your transaction',
@@ -102,6 +107,7 @@ export const handlePaymentWebhook = async (req, res) => {
 };
 
 const sendTransactionNotification = async (req, userId, payload) => {
+
   req.sendToUser(userId, payload);
 
   await sendPushNotification(

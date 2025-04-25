@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 const transactionSchema = new mongoose.Schema({
-  internal_reference: { type: String, required: true, unique: true },
+  transactionId: { type: String, required: true, unique: true },
   userUID: { type: String }, // Could be user ID or account number
   msisdn: { type: String, required: true },
   amount: { type: Number, required: true },
@@ -22,10 +22,5 @@ const transactionSchema = new mongoose.Schema({
   user: { type: String }
 }, { timestamps: true });
 
-// Add indexes for faster queries
-transactionSchema.index({ internal_reference: 1 });
-transactionSchema.index({ customer_reference: 1 });
-transactionSchema.index({ status: 1 });
-transactionSchema.index({ createdAt: 1 });
 
 export default mongoose.model('Transaction', transactionSchema);

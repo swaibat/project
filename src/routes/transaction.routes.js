@@ -7,6 +7,6 @@ import {
 const router = express.Router();
 
 router.get('/:userId', getTransactions);
-router.get('/details/:reference', getTransactionDetails);
+router.get('/details/:transactionId', getTransactionDetails);
 
 export default router;

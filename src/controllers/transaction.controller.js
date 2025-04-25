@@ -37,9 +37,9 @@ export const getTransactions = async (req, res) => {
 
 export const getTransactionDetails = async (req, res) => {
   try {
-    const { reference } = req.params;
+    const { transactionId } = req.params;
     const transaction = await Transaction.findOne({
-      internal_reference: reference,
+      transactionId,
     }).populate('user', 'uid accountId username');
 
     if (!transaction) {

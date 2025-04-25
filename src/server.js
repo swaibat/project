@@ -5,7 +5,6 @@ import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { handleWebSocketConnection } from './websocket/wsHandler.js';
-import { gameRoutes } from './routes/gameRoutes.js';
 import router from './routes/index.js';
 
 dotenv.config();
@@ -25,7 +24,7 @@ const activeConnections = new Map(); // userId -> WebSocket
 app.use((req, res, next) => {
   req.sendToUser = (userId, message) => {
     const ws = activeConnections.get(userId);
-    if (ws && ws.readyState === ws.OPEN) {
+    if (ws && ws?.readyState === ws.OPEN) {
       ws.send(JSON.stringify(message));
     }
   };
@@ -45,10 +44,10 @@ wss.on('connection', (ws) => {
   ws.on('message', (message) => {
     try {
       const data = JSON.parse(message);
-      if (data.type === 'IDENTIFY' && data.playerId) {
+      if (data.type === 'IDENTIFY' && data.data.playerId) {
         // Map user ID to WebSocket connection
-        activeConnections.set(data.playerId, ws);
-        ws.userId = data.playerId;
+        activeConnections.set(data.data.playerId, ws);
+        ws.userId = data.data.playerId;
       }
     } catch (error) {
       console.error('Error processing WebSocket message:', error);
@@ -71,14 +70,6 @@ mongoose
 
 // Routes
 app.use('/api', router);
-
-// WebSocket Connection Handler
-// wss.on('connection', (ws) => handleWebSocketConnection(ws));
-
-// Basic health check route
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {

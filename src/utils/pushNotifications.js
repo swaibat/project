@@ -1,16 +1,27 @@
 import admin from '../firebase/config.js';
+import User from '../models/User.js';
 
-export async function sendPushNotification(token, title, body, data = {}) {
+export async function sendPushNotification(userId, title, body, data = {}) {
   try {
+    // 1. Find user by custom `uid` field (not _id)
+    const user = await User.findOne({ uid: userId });
+
+    console.log('user', user, userId);
+
+    if (!user || !user.fcmToken) {
+      throw new Error('User not found or FCM token missing');
+    }
+    // 2. Construct the FCM message
     const message = {
       notification: {
         title,
         body,
       },
-      data, // optional custom data
-      token,
+      data,
+      token: user.fcmToken,
     };
 
+    // 3. Send the message
     const response = await admin.messaging().send(message);
     return { success: true, response };
   } catch (error) {

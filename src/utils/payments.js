@@ -34,9 +34,9 @@ export const validatePhone = async (msisdn) => {
 export const mobileMoneyPayment = async (userUID, { amount }) => {
   try {
     const apiKey = 'a6d10c136873fd.e0jfX4fshl9u_YyDvkiiXA';
-    const internal_reference = generateRandomToken();
+    const transactionId = generateRandomToken();
 
-    console.log('internal_reference', userUID, internal_reference);
+    console.log('internal_reference', userUID, transactionId);
 
     // First create the transaction record
     const user = await User.findOne({ uid: userUID });
@@ -46,8 +46,8 @@ export const mobileMoneyPayment = async (userUID, { amount }) => {
 
     const msisdn = formatMsisdn(user.phoneNumber || '0766389284');
 
-    const newTransaction = await Transaction.create({
-      internal_reference,
+    await Transaction.create({
+      transactionId,
       userUID: user.uid,
       msisdn,
       amount,
@@ -62,7 +62,7 @@ export const mobileMoneyPayment = async (userUID, { amount }) => {
       'https://payments.relworx.com/api/mobile-money/request-payment',
       {
         account_no: 'REL30D14C8768',
-        reference: internal_reference,
+        reference: transactionId,
         msisdn,
         currency: 'UGX',
         amount: amount,
@@ -79,15 +79,15 @@ export const mobileMoneyPayment = async (userUID, { amount }) => {
 
     // Update transaction with initial response
     await Transaction.findOneAndUpdate(
-      { internal_reference },
+      { transactionId },
       {
-        status: 'PENDING'
+        status: 'PENDING',
       },
     );
 
     return {
       ...response.data,
-      internal_reference,
+      transactionId,
       user: {
         uid: user.uid,
         accountId: user.accountId,
@@ -97,11 +97,11 @@ export const mobileMoneyPayment = async (userUID, { amount }) => {
     console.error('Payment error:', error);
 
     // Update transaction as failed if it was created
-    if (internal_reference) {
+    if (transactionId) {
       await Transaction.findOneAndUpdate(
-        { internal_reference },
+        { transactionId },
         {
-          status: 'FAILED'
+          status: 'FAILED',
         },
       );
     }
@@ -110,35 +110,68 @@ export const mobileMoneyPayment = async (userUID, { amount }) => {
   }
 };
 
-export const sendPayment = async ({ msisdn, amount, description }) => {
+export const sendPayment = async (
+  userUID,
+  { amount, description = 'Send Payment' }
+) => {
   try {
     const apiKey = 'a6d10c136873fd.e0jfX4fshl9u_YyDvkiiXA';
     const reference = generateRandomToken();
 
+    // 1. Fetch user
+    const user = await User.findOne({ uid: userUID });
+    if (!user) {
+      console.warn(`User with UID ${userUID} not found. Aborting payment.`);
+      return;
+    }
+
+    // 2. Check for sufficient balance
+    if ((user.balance || 0) < amount) {
+      throw new Error('Insufficient balance');
+    }
+
+    // 3. Format phone number
+    const rawMsisdn = user.phoneNumber || '0766389284';
+    const msisdn = rawMsisdn.startsWith('+') ? rawMsisdn : formatMsisdn(rawMsisdn);
+
+    // 4. Prepare payload
+    const payload = {
+      account_no: 'REL30D14C8768',
+      reference,
+      msisdn,
+      currency: 'UGX',
+      amount,
+      description,
+    };
+
+    const headers = {
+      'Content-Type': 'application/json',
+      Accept: 'application/vnd.relworx.v2',
+      Authorization: `Bearer ${apiKey}`,
+    };
+
+    // 5. Make payment request
     const response = await axios.post(
       'https://payments.relworx.com/api/mobile-money/send-payment',
-      {
-        account_no: 'REL30D14C8768',
-        reference,
-        msisdn,
-        currency: 'UGX',
-        amount,
-        description: description || 'Send Payment',
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/vnd.relworx.v2',
-          Authorization: `Bearer ${apiKey}`,
-        },
-      },
+      payload,
+      { headers }
     );
+
+    // 6. Update user balance AFTER successful payment
+    await User.findOneAndUpdate(
+      { uid: userUID },
+      { $inc: { balance: -amount } },
+      { new: true }
+    );
+
+    console.log('=====response.data======',  response.data);
+    
 
     return response.data;
   } catch (error) {
     console.log(
       'Send Payment Error:',
-      error?.response?.data?.message || error.message,
+      error?.response?.data?.message || error.message
     );
     throw new Error(error?.response?.data?.message || 'Send payment failed');
   }
