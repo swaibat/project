@@ -15,8 +15,10 @@ const userSchema = new mongoose.Schema({
   winRate: { type: Number, default: 0 },
   lastPlayed: { type: Date, default: null },
   avatar: { type: Number },
-  phoneNumber: { type: Number, default: 1 },
+  phoneNumber: { type: String },
   fcmToken: { type: String, default: '' },
+  bonusCoins: { type: Number, default: 0 },
+  lastBonusTime: { type: Date, default: Date.now },
 });
 
 export default mongoose.model('User', userSchema);

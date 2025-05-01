@@ -7,7 +7,7 @@ export const processDeposit = async (req, res) => {
   try {
     const { amount } = req.body;
 
-    const data = await mobileMoneyPayment(req.params.uid, {
+    const data = await mobileMoneyPayment(req.user.uid, {
       amount,
     });
     return res.status(200).send({ status: 200, data });
@@ -22,7 +22,7 @@ export const withdrawMoney = async (req, res) => {
   try {
     const { amount } = req.body;
 
-    const data = await sendPayment(req.params.uid, {
+    const data = await sendPayment(req.user.uid, {
       amount,
     });
     return res.status(200).send({ status: 200, data });

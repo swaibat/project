@@ -6,6 +6,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { handleWebSocketConnection } from './websocket/wsHandler.js';
 import router from './routes/index.js';
+import { startBonusCron } from './utils/bonusCron.js';
 
 dotenv.config();
 
@@ -70,6 +71,8 @@ mongoose
 
 // Routes
 app.use('/api', router);
+
+startBonusCron(activeConnections)
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {

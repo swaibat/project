@@ -1,18 +1,36 @@
-import jwt from 'jsonwebtoken';
+import { OAuth2Client } from 'google-auth-library';
+import User from '../models/User.js';
+import admin from '../firebase/config.js';
 
-export const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+const client = new OAuth2Client(process.env.CLIENT_ID);
 
-  if (!token) {
-    return res.status(401).json({ error: 'Authentication required' });
+export const verifyToken = async (req, res, next) => {
+  const idToken = req.headers['authorization']?.split(' ')[1];
+
+  if (!idToken) {
+    return res.status(401).json({ error: 'Authorization token is required' });
   }
 
   try {
-    const user = jwt.verify(token, process.env.JWT_SECRET);
+    // 🛡️ Verify token with Firebase Admin SDK
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const email = decodedToken.email;
+
+    if (!email) {
+      return res.status(401).json({ error: 'Invalid token payload (missing email)' });
+    }
+
+    // Fetch user from MongoDB
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
     req.user = user;
     next();
   } catch (error) {
-    return res.status(403).json({ error: 'Invalid token' });
+    console.error('Error verifying token:', error.message);
+    return res.status(401).json({ error: 'Invalid token or token expired' });
   }
 };
