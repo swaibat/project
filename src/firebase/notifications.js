@@ -33,14 +33,19 @@ const sendPushNotification = async (token, payload) => {
 };
 
 // 1. Game Request
-const sendGameRequestNotification = ({ token, fromPlayerId, fromPlayerName, stake }) =>
+const sendGameRequestNotification = ({
+  token,
+  fromuid,
+  fromPlayerName,
+  stake,
+}) =>
   sendPushNotification(token, {
     title: 'Matatu Challenge!',
     body: `${fromPlayerName} wants to verse you for ${stake} points.`,
     data: {
       type: 'GAME_REQUEST',
       stake: String(stake),
-      fromPlayerId,
+      fromuid,
       fromPlayerName,
     },
   });

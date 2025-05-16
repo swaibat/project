@@ -1,10 +1,10 @@
 // botManager.js
 
-import { 
+import {
   createBotPlayer as createBot,
   startBotGame as startGame,
   handleBotMessage as processBotMessage,
-  handleBotTurn
+  handleBotTurn,
 } from './botPlayer.js';
 
 // Store active bot games
@@ -27,13 +27,13 @@ export const createBotPlayer = () => {
  */
 export const startBotGame = async (player, botPlayer, clients) => {
   const gameState = await startGame(player, botPlayer, clients);
-  
+
   botGames.set(gameState.gameId, {
     gameState,
     botId: botPlayer.id,
-    playerId: player.id
+    uid: player.id,
   });
-  
+
   return gameState;
 };
 
@@ -46,13 +46,13 @@ export const startBotGame = async (player, botPlayer, clients) => {
  */
 export const handleBotMessage = async (ws, data, clients) => {
   if (!data.data || !data.data.to) return false;
-  
+
   const { to } = data.data;
-  
+
   // Check if this is a message to a bot
   const isBotGame = to.startsWith('bot_');
   if (!isBotGame) return false;
-  
+
   await processBotMessage(ws, data, clients);
   return true;
 };
@@ -60,20 +60,22 @@ export const handleBotMessage = async (ws, data, clients) => {
 /**
  * Start a single-player game against a bot
  * @param {Object} ws - WebSocket connection
- * @param {string} playerId - Player ID
+ * @param {string} uid - Player ID
  * @param {Map} clients - WebSocket clients map
  */
-export const startSinglePlayerGame = async (ws, playerId, clients) => {
+export const startSinglePlayerGame = async (ws, uid, clients) => {
   const botPlayer = createBotPlayer();
-  const gameState = await startBotGame({ id: playerId }, botPlayer, clients);
-  
-  ws.send(JSON.stringify({
-    type: 'BOT_GAME_CREATED',
-    gameId: gameState.gameId,
-    botId: botPlayer.id,
-    message: `Started a game with ${botPlayer.username}`
-  }));
-  
+  const gameState = await startBotGame({ id: uid }, botPlayer, clients);
+
+  ws.send(
+    JSON.stringify({
+      type: 'BOT_GAME_CREATED',
+      gameId: gameState.gameId,
+      botId: botPlayer.id,
+      message: `Started a game with ${botPlayer.username}`,
+    }),
+  );
+
   return gameState;
 };
 
@@ -82,7 +84,7 @@ export const startSinglePlayerGame = async (ws, playerId, clients) => {
  */
 export const cleanupBotGames = async () => {
   const { GameState } = await import('../models/GameState.js');
-  
+
   for (const [gameId, game] of botGames.entries()) {
     const gameState = await GameState.findOne({ gameId });
     if (!gameState || gameState.status === 'COMPLETED') {
@@ -93,4 +95,3 @@ export const cleanupBotGames = async () => {
 
 // Run cleanup every hour
 setInterval(cleanupBotGames, 60 * 60 * 1000);
-

@@ -1,7 +1,9 @@
 // firebaseAdmin.js
 import admin from 'firebase-admin';
 import dotenv from 'dotenv';
-import serviceAccount from './serviceAccountKey.json' assert { type: 'json' }; // Ensure this is added safely
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const serviceAccount = require('./serviceAccountKey.json');
 
 dotenv.config();
 

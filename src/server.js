@@ -45,10 +45,10 @@ wss.on('connection', (ws) => {
   ws.on('message', (message) => {
     try {
       const data = JSON.parse(message);
-      if (data.type === 'IDENTIFY' && data.data.playerId) {
+      if (data.type === 'IDENTIFY' && data.data.uid) {
         // Map user ID to WebSocket connection
-        activeConnections.set(data.data.playerId, ws);
-        ws.userId = data.data.playerId;
+        activeConnections.set(data.data.uid, ws);
+        ws.userId = data.data.uid;
       }
     } catch (error) {
       console.error('Error processing WebSocket message:', error);
@@ -72,7 +72,7 @@ mongoose
 // Routes
 app.use('/api', router);
 
-startBonusCron(activeConnections)
+startBonusCron(activeConnections);
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {

@@ -38,14 +38,17 @@ export const createBotPlayer = () => {
 export const startBotGame = async (player, botPlayer, clients) => {
   const { initializeDeck } = await import('../utils/cardUtils.js');
   const { GameState } = await import('../models/GameState.js');
-  
-  const { deck, playerHands, cuttingCard } = initializeDeck([player.id, botPlayer.id]);
-  
+
+  const { deck, playerHands, cuttingCard } = initializeDeck([
+    player.id,
+    botPlayer.id,
+  ]);
+
   const gameState = new GameState({
     players: playerHands,
     status: 'ACTIVE',
     userId: player.id,
-    currentTurn: player.id,  // Human player starts
+    currentTurn: player.id, // Human player starts
     cuttingCard,
     deck,
     playedCards: [],
@@ -53,23 +56,25 @@ export const startBotGame = async (player, botPlayer, clients) => {
     chosenSuit: null,
     isBot: true,
     botId: botPlayer.id,
-    playerId: player.id
+    uid: player.id,
   });
 
   await gameState.save();
-  
+
   // Send game start to human player
   const playerWs = clients.get(player.id);
   if (playerWs) {
-    playerWs.send(JSON.stringify({
-      type: 'GAME_REQUEST_ACCEPTED',
-      gameId: gameState.gameId,
-      gameState,
-      isBot: true,
-      botId: botPlayer.id
-    }));
+    playerWs.send(
+      JSON.stringify({
+        type: 'GAME_REQUEST_ACCEPTED',
+        gameId: gameState.gameId,
+        gameState,
+        isBot: true,
+        botId: botPlayer.id,
+      }),
+    );
   }
-  
+
   return gameState;
 };
 
@@ -82,45 +87,60 @@ export const startBotGame = async (player, botPlayer, clients) => {
 export const handleBotTurn = async (gameId, clients) => {
   const { GameState } = await import('../models/GameState.js');
   const gameState = await GameState.findOne({ gameId });
-  
+
   if (!gameState || !gameState.isBot || !gameState.botId) {
     return;
   }
-  
+
   // If it's not bot's turn, exit
   if (gameState.currentTurn !== gameState.botId) {
     return;
   }
-  
+
   // Wait for "thinking" time
-  await new Promise(resolve => setTimeout(resolve, BOT_DELAY_MS));
-  
+  await new Promise((resolve) => setTimeout(resolve, BOT_DELAY_MS));
+
   const botHand = gameState.players.get(gameState.botId);
-  const lastPlayedCard = gameState.playedCards.length > 0 
-    ? gameState.playedCards[gameState.playedCards.length - 1] 
-    : null;
-  const playerId = gameState.playerId;
+  const lastPlayedCard =
+    gameState.playedCards.length > 0
+      ? gameState.playedCards[gameState.playedCards.length - 1]
+      : null;
+  const uid = gameState.uid;
   const botId = gameState.botId;
-  
+
   // Check if there's an active penalty
   const penaltyActive = isPenaltyActive(lastPlayedCard);
   const currentPenalty = penaltyActive ? calculatePenalty(lastPlayedCard) : 0;
-  
+
   // First, try to find a valid card to play
-  const playableCard = findPlayableCard(botHand, lastPlayedCard, gameState.chosenSuit, penaltyActive, currentPenalty);
-  
-  const playerWs = clients.get(playerId);
+  const playableCard = findPlayableCard(
+    botHand,
+    lastPlayedCard,
+    gameState.chosenSuit,
+    penaltyActive,
+    currentPenalty,
+  );
+
+  const playerWs = clients.get(uid);
   if (!playerWs) return;
-  
+
   if (playableCard) {
     // Bot has a valid card to play
-    await playBotCard(playableCard, botId, playerId, gameState, playerWs, penaltyActive, currentPenalty);
+    await playBotCard(
+      playableCard,
+      botId,
+      uid,
+      gameState,
+      playerWs,
+      penaltyActive,
+      currentPenalty,
+    );
   } else if (penaltyActive) {
     // Bot can't counter penalty, must draw cards
-    await botDrawPenaltyCards(botId, playerId, gameState, playerWs, currentPenalty);
+    await botDrawPenaltyCards(botId, uid, gameState, playerWs, currentPenalty);
   } else {
     // Bot has no valid card, must draw from pile
-    await botDrawCard(botId, playerId, gameState, playerWs);
+    await botDrawCard(botId, uid, gameState, playerWs);
   }
 };
 
@@ -153,57 +173,87 @@ const calculatePenalty = (lastPlayedCard) => {
  * @param {number} currentPenalty - Current penalty value
  * @returns {Object|null} Valid card to play or null
  */
-const findPlayableCard = (botHand, lastPlayedCard, chosenSuit, penaltyActive, currentPenalty) => {
+const findPlayableCard = (
+  botHand,
+  lastPlayedCard,
+  chosenSuit,
+  penaltyActive,
+  currentPenalty,
+) => {
   if (!botHand || botHand.length === 0) return null;
   if (!lastPlayedCard) return botHand[0]; // Play any card if no card is played yet
-  
+
   // First, try to find a card that cancels or adds to penalty if penalty is active
   if (penaltyActive) {
     // Look for joker (value 15, spades) first to cancel penalty
-    const joker = botHand.find(card => card.value === 15 && card.suit === 'spades');
+    const joker = botHand.find(
+      (card) => card.value === 15 && card.suit === 'spades',
+    );
     if (joker) return joker;
-    
+
     // Look for cards with same penalty value
-    const samePenaltyCards = botHand.filter(card => 
-      PENALTY_CARD_VALUES.includes(card.value) &&
-      (card.suit === lastPlayedCard.suit || card.value === lastPlayedCard.value)
+    const samePenaltyCards = botHand.filter(
+      (card) =>
+        PENALTY_CARD_VALUES.includes(card.value) &&
+        (card.suit === lastPlayedCard.suit ||
+          card.value === lastPlayedCard.value),
     );
     if (samePenaltyCards.length > 0) return samePenaltyCards[0];
-    
+
     // Look for cards with matching color
-    const sameColorCards = botHand.filter(card => {
-      if (card.suit === 'red' && (lastPlayedCard.suit === 'hearts' || lastPlayedCard.suit === 'diamonds')) return true;
-      if (card.suit === 'black' && (lastPlayedCard.suit === 'spades' || lastPlayedCard.suit === 'clubs')) return true;
+    const sameColorCards = botHand.filter((card) => {
+      if (
+        card.suit === 'red' &&
+        (lastPlayedCard.suit === 'hearts' || lastPlayedCard.suit === 'diamonds')
+      )
+        return true;
+      if (
+        card.suit === 'black' &&
+        (lastPlayedCard.suit === 'spades' || lastPlayedCard.suit === 'clubs')
+      )
+        return true;
       return false;
     });
     if (sameColorCards.length > 0) return sameColorCards[0];
   }
-  
+
   // Check for special card - joker (value 15)
-  const joker = botHand.find(card => card.value === 15);
+  const joker = botHand.find((card) => card.value === 15);
   if (joker) return joker;
-  
+
   // Check for cards that match chosen suit
   if (chosenSuit) {
-    const suitMatches = botHand.filter(card => {
+    const suitMatches = botHand.filter((card) => {
       if (card.suit === chosenSuit) return true;
-      if (card.suit === 'red' && (chosenSuit === 'hearts' || chosenSuit === 'diamonds')) return true;
-      if (card.suit === 'black' && (chosenSuit === 'spades' || chosenSuit === 'clubs')) return true;
+      if (
+        card.suit === 'red' &&
+        (chosenSuit === 'hearts' || chosenSuit === 'diamonds')
+      )
+        return true;
+      if (
+        card.suit === 'black' &&
+        (chosenSuit === 'spades' || chosenSuit === 'clubs')
+      )
+        return true;
       return false;
     });
     if (suitMatches.length > 0) return suitMatches[0];
   }
-  
+
   // Check for cards that match suit or value
-  const matches = botHand.filter(card => 
-    card.suit === lastPlayedCard.suit || 
-    card.value === lastPlayedCard.value ||
-    (card.suit === 'red' && (lastPlayedCard.suit === 'hearts' || lastPlayedCard.suit === 'diamonds')) ||
-    (card.suit === 'black' && (lastPlayedCard.suit === 'spades' || lastPlayedCard.suit === 'clubs'))
+  const matches = botHand.filter(
+    (card) =>
+      card.suit === lastPlayedCard.suit ||
+      card.value === lastPlayedCard.value ||
+      (card.suit === 'red' &&
+        (lastPlayedCard.suit === 'hearts' ||
+          lastPlayedCard.suit === 'diamonds')) ||
+      (card.suit === 'black' &&
+        (lastPlayedCard.suit === 'spades' || lastPlayedCard.suit === 'clubs')),
   );
-  
+
   if (matches.length > 0) return matches[0];
-  
+
   return null; // No valid card found
 };
 
@@ -211,216 +261,257 @@ const findPlayableCard = (botHand, lastPlayedCard, chosenSuit, penaltyActive, cu
  * Play a card from bot's hand
  * @param {Object} card - Card to play
  * @param {string} botId - Bot player ID
- * @param {string} playerId - Human player ID
+ * @param {string} uid - Human player ID
  * @param {Object} gameState - Game state
  * @param {Object} playerWs - Player's WebSocket
  * @param {boolean} penaltyActive - Whether there's an active penalty
  * @param {number} currentPenalty - Current penalty value
  */
-const playBotCard = async (card, botId, playerId, gameState, playerWs, penaltyActive, currentPenalty) => {
+const playBotCard = async (
+  card,
+  botId,
+  uid,
+  gameState,
+  playerWs,
+  penaltyActive,
+  currentPenalty,
+) => {
   // Remove card from bot's hand
   const botHand = gameState.players.get(botId);
-  const cardIndex = botHand.findIndex(c => c.id === card.id);
+  const cardIndex = botHand.findIndex((c) => c.id === card.id);
   if (cardIndex === -1) return;
-  
+
   botHand.splice(cardIndex, 1);
-  
+
   // Add card to played cards
   gameState.playedCards.push({ ...card, type: 'played' });
   gameState.currentCard = card;
-  
+
   // Choose suit for special cards
   let selectedSuit = card.suit;
-  if (card.value === 15 || (card.value === 7 && card.suit === gameState.cuttingCard.suit)) {
+  if (
+    card.value === 15 ||
+    (card.value === 7 && card.suit === gameState.cuttingCard.suit)
+  ) {
     // Bot chooses a suit (simplified logic: choose the most common suit in bot's hand)
     const suitCounts = { hearts: 0, diamonds: 0, clubs: 0, spades: 0 };
-    botHand.forEach(c => {
+    botHand.forEach((c) => {
       if (c.suit in suitCounts) suitCounts[c.suit]++;
     });
-    
-    const mostCommonSuit = Object.entries(suitCounts)
-      .sort((a, b) => b[1] - a[1])[0][0];
-    
+
+    const mostCommonSuit = Object.entries(suitCounts).sort(
+      (a, b) => b[1] - a[1],
+    )[0][0];
+
     selectedSuit = mostCommonSuit;
     gameState.chosenSuit = mostCommonSuit;
   }
-  
+
   // Update turn
-  gameState.currentTurn = playerId;
-  
+  gameState.currentTurn = uid;
+
   // Check for win condition
   if (botHand.length === 0) {
     gameState.winner = botId;
     gameState.status = 'COMPLETED';
-    
+
     await gameState.save();
-    
-    playerWs.send(JSON.stringify({
-      type: 'WIN',
-      gameState,
-      from: botId,
-      to: playerId,
-      winningCard: card
-    }));
+
+    playerWs.send(
+      JSON.stringify({
+        type: 'WIN',
+        gameState,
+        from: botId,
+        to: uid,
+        winningCard: card,
+      }),
+    );
     return;
   }
-  
+
   await gameState.save();
-  
+
   // Determine if new penalty is active
   const newPenaltyActive = PENALTY_CARD_VALUES.includes(card.value);
   const newPenaltyValue = card.value === 50 ? 5 : card.value;
-  
+
   // Special case for spade joker canceling penalty
   if (card.value === 15 && card.suit === 'spades' && penaltyActive) {
-    playerWs.send(JSON.stringify({
+    playerWs.send(
+      JSON.stringify({
+        type: 'MOVE',
+        data: {
+          from: botId,
+          to: uid,
+          card,
+          action: 'play',
+          penaltyActive: false,
+          currentPenalty: 0,
+          selectedSuit,
+        },
+      }),
+    );
+    return;
+  }
+
+  // Send the move to the player
+  playerWs.send(
+    JSON.stringify({
       type: 'MOVE',
       data: {
         from: botId,
-        to: playerId,
+        to: uid,
         card,
         action: 'play',
-        penaltyActive: false,
-        currentPenalty: 0,
-        selectedSuit
-      }
-    }));
-    return;
-  }
-  
-  // Send the move to the player
-  playerWs.send(JSON.stringify({
-    type: 'MOVE',
-    data: {
-      from: botId,
-      to: playerId,
-      card,
-      action: 'play',
-      penaltyActive: newPenaltyActive,
-      currentPenalty: newPenaltyActive ? newPenaltyValue : 0,
-      selectedSuit
-    }
-  }));
+        penaltyActive: newPenaltyActive,
+        currentPenalty: newPenaltyActive ? newPenaltyValue : 0,
+        selectedSuit,
+      },
+    }),
+  );
 };
 
 /**
  * Bot draws penalty cards
  * @param {string} botId - Bot player ID
- * @param {string} playerId - Human player ID
+ * @param {string} uid - Human player ID
  * @param {Object} gameState - Game state
  * @param {Object} playerWs - Player's WebSocket
  * @param {number} penaltyCount - Number of cards to draw
  */
-const botDrawPenaltyCards = async (botId, playerId, gameState, playerWs, penaltyCount) => {
+const botDrawPenaltyCards = async (
+  botId,
+  uid,
+  gameState,
+  playerWs,
+  penaltyCount,
+) => {
   const botHand = gameState.players.get(botId);
-  
+
   // Draw penalty cards
   for (let i = 0; i < penaltyCount; i++) {
     if (gameState.deck.length === 0) {
       // Reshuffle played cards if deck is empty
       if (gameState.playedCards.length > 1) {
-        gameState.deck = gameState.playedCards.slice(0, -1).map(c => ({ ...c, type: 'pile' }));
-        gameState.playedCards = [gameState.playedCards[gameState.playedCards.length - 1]];
+        gameState.deck = gameState.playedCards
+          .slice(0, -1)
+          .map((c) => ({ ...c, type: 'pile' }));
+        gameState.playedCards = [
+          gameState.playedCards[gameState.playedCards.length - 1],
+        ];
       } else {
         break; // No more cards to draw
       }
     }
-    
+
     const card = gameState.deck.pop();
     if (card) {
       botHand.push({ ...card, type: 'player' });
     }
   }
-  
+
   // Reset penalty state
-  gameState.currentTurn = playerId;
-  
+  gameState.currentTurn = uid;
+
   await gameState.save();
-  
+
   // Notify player
-  playerWs.send(JSON.stringify({
-    type: 'DRAW',
-    data: {
-      from: botId,
-      to: playerId,
-      count: penaltyCount
-    }
-  }));
+  playerWs.send(
+    JSON.stringify({
+      type: 'DRAW',
+      data: {
+        from: botId,
+        to: uid,
+        count: penaltyCount,
+      },
+    }),
+  );
 };
 
 /**
  * Bot draws a card from the pile
  * @param {string} botId - Bot player ID
- * @param {string} playerId - Human player ID
+ * @param {string} uid - Human player ID
  * @param {Object} gameState - Game state
  * @param {Object} playerWs - Player's WebSocket
  */
-const botDrawCard = async (botId, playerId, gameState, playerWs) => {
+const botDrawCard = async (botId, uid, gameState, playerWs) => {
   const botHand = gameState.players.get(botId);
-  
+
   // Check if deck is empty and needs reshuffling
   if (gameState.deck.length === 0) {
     if (gameState.playedCards.length > 1) {
-      gameState.deck = gameState.playedCards.slice(0, -1).map(c => ({ ...c, type: 'pile' }));
-      gameState.playedCards = [gameState.playedCards[gameState.playedCards.length - 1]];
+      gameState.deck = gameState.playedCards
+        .slice(0, -1)
+        .map((c) => ({ ...c, type: 'pile' }));
+      gameState.playedCards = [
+        gameState.playedCards[gameState.playedCards.length - 1],
+      ];
     } else {
       // No more cards to draw, skip turn
-      gameState.currentTurn = playerId;
+      gameState.currentTurn = uid;
       await gameState.save();
-      
-      playerWs.send(JSON.stringify({
-        type: 'SKIP',
-        data: {
-          from: botId,
-          to: playerId
-        }
-      }));
+
+      playerWs.send(
+        JSON.stringify({
+          type: 'SKIP',
+          data: {
+            from: botId,
+            to: uid,
+          },
+        }),
+      );
       return;
     }
   }
-  
+
   // Draw a card
   const card = gameState.deck.pop();
   if (card) {
     botHand.push({ ...card, type: 'player' });
-    
+
     // Check if drawn card can be played
-    const lastPlayedCard = gameState.playedCards.length > 0 
-      ? gameState.playedCards[gameState.playedCards.length - 1] 
-      : null;
+    const lastPlayedCard =
+      gameState.playedCards.length > 0
+        ? gameState.playedCards[gameState.playedCards.length - 1]
+        : null;
     const canPlay = isValidMove(card, lastPlayedCard, gameState.chosenSuit);
-    
+
     if (canPlay) {
       // Wait a bit to simulate "thinking" before playing the drawn card
       setTimeout(async () => {
-        await playBotCard(card, botId, playerId, gameState, playerWs, false, 0);
+        await playBotCard(card, botId, uid, gameState, playerWs, false, 0);
       }, BOT_DELAY_MS);
       return;
     }
   }
-  
+
   // Switch turn to player
-  gameState.currentTurn = playerId;
+  gameState.currentTurn = uid;
   await gameState.save();
-  
+
   // Notify player of draw and turn change
-  playerWs.send(JSON.stringify({
-    type: 'DRAW',
-    data: {
-      from: botId,
-      to: playerId,
-      count: 1
-    }
-  }));
-  
+  playerWs.send(
+    JSON.stringify({
+      type: 'DRAW',
+      data: {
+        from: botId,
+        to: uid,
+        count: 1,
+      },
+    }),
+  );
+
   // Send skip message after draw
-  playerWs.send(JSON.stringify({
-    type: 'SKIP',
-    data: {
-      from: botId,
-      to: playerId
-    }
-  }));
+  playerWs.send(
+    JSON.stringify({
+      type: 'SKIP',
+      data: {
+        from: botId,
+        to: uid,
+      },
+    }),
+  );
 };
 
 /**
@@ -432,27 +523,44 @@ const botDrawCard = async (botId, playerId, gameState, playerWs) => {
  */
 const isValidMove = (card, lastPlayedCard, chosenSuit) => {
   if (!lastPlayedCard) return true; // First card is always valid
-  
+
   // Check chosen suit match
   if (chosenSuit) {
     if (card.suit === chosenSuit) return true;
-    if (card.suit === 'red' && (chosenSuit === 'hearts' || chosenSuit === 'diamonds')) return true;
-    if (card.suit === 'black' && (chosenSuit === 'spades' || chosenSuit === 'clubs')) return true;
+    if (
+      card.suit === 'red' &&
+      (chosenSuit === 'hearts' || chosenSuit === 'diamonds')
+    )
+      return true;
+    if (
+      card.suit === 'black' &&
+      (chosenSuit === 'spades' || chosenSuit === 'clubs')
+    )
+      return true;
   }
-  
+
   // Joker is always valid
   if (card.value === 15) return true;
-  
+
   // Special joker (spades) always valid for penalty
   if (card.value === 15 && card.suit === 'spades') return true;
-  
+
   // Check color match
-  if (card.suit === 'red' && (lastPlayedCard.suit === 'hearts' || lastPlayedCard.suit === 'diamonds')) return true;
-  if (card.suit === 'black' && (lastPlayedCard.suit === 'spades' || lastPlayedCard.suit === 'clubs')) return true;
-  
+  if (
+    card.suit === 'red' &&
+    (lastPlayedCard.suit === 'hearts' || lastPlayedCard.suit === 'diamonds')
+  )
+    return true;
+  if (
+    card.suit === 'black' &&
+    (lastPlayedCard.suit === 'spades' || lastPlayedCard.suit === 'clubs')
+  )
+    return true;
+
   // Check suit or value match
-  if (card.suit === lastPlayedCard.suit || card.value === lastPlayedCard.value) return true;
-  
+  if (card.suit === lastPlayedCard.suit || card.value === lastPlayedCard.value)
+    return true;
+
   return false;
 };
 
@@ -465,22 +573,22 @@ const isValidMove = (card, lastPlayedCard, chosenSuit) => {
 export const handleBotMessage = async (ws, data, clients) => {
   if (!data.data || !data.data.to) return;
   const { GameState } = await import('../models/GameState.js');
-  
+
   const { to, from } = data.data;
-  
+
   // Check if this is a message to a bot
   const isBotGame = to.startsWith('bot_');
   if (!isBotGame) return;
-  
+
   // Get game state for this player-bot pair
   const gameState = await GameState.findOne({
     isBot: true,
     botId: to,
-    playerId: from
+    uid: from,
   });
-  
+
   if (!gameState) return;
-  
+
   // Update game state based on player's move
   switch (data.type) {
     case 'MOVE':
@@ -499,7 +607,7 @@ export const handleBotMessage = async (ws, data, clients) => {
       await gameState.save();
       return; // Game over, no need for bot to respond
   }
-  
+
   // Schedule bot's turn
   if (gameState.currentTurn === to) {
     setTimeout(() => handleBotTurn(gameState.gameId, clients), BOT_DELAY_MS);
@@ -513,34 +621,34 @@ export const handleBotMessage = async (ws, data, clients) => {
  */
 const handlePlayerMove = async (gameState, moveData) => {
   const { card, selectedSuit, penaltyActive } = moveData;
-  
+
   // Update player's hand
-  const playerHand = gameState.players.get(gameState.playerId);
-  const cardIndex = playerHand.findIndex(c => c.id === card.id);
-  
+  const playerHand = gameState.players.get(gameState.uid);
+  const cardIndex = playerHand.findIndex((c) => c.id === card.id);
+
   if (cardIndex !== -1) {
     playerHand.splice(cardIndex, 1);
     gameState.playedCards.push({ ...card, type: 'played' });
     gameState.currentCard = card;
-    
+
     if (selectedSuit) {
       gameState.chosenSuit = selectedSuit;
     }
-    
+
     // Check for win condition
     if (playerHand.length === 0) {
-      gameState.winner = gameState.playerId;
+      gameState.winner = gameState.uid;
       gameState.status = 'COMPLETED';
       await gameState.save();
       return;
     }
-    
+
     // Update turn if not a turn-holding card
     if (![8, 11].includes(card.value)) {
       gameState.currentTurn = gameState.botId;
     }
   }
-  
+
   await gameState.save();
 };
 
@@ -551,26 +659,30 @@ const handlePlayerMove = async (gameState, moveData) => {
  */
 const handlePlayerDraw = async (gameState, drawData) => {
   const { count } = drawData;
-  const playerHand = gameState.players.get(gameState.playerId);
-  
+  const playerHand = gameState.players.get(gameState.uid);
+
   // Add cards to player's hand
   for (let i = 0; i < count; i++) {
     if (gameState.deck.length === 0) {
       // Reshuffle if needed
       if (gameState.playedCards.length > 1) {
-        gameState.deck = gameState.playedCards.slice(0, -1).map(c => ({ ...c, type: 'pile' }));
-        gameState.playedCards = [gameState.playedCards[gameState.playedCards.length - 1]];
+        gameState.deck = gameState.playedCards
+          .slice(0, -1)
+          .map((c) => ({ ...c, type: 'pile' }));
+        gameState.playedCards = [
+          gameState.playedCards[gameState.playedCards.length - 1],
+        ];
       } else {
         break; // No more cards
       }
     }
-    
+
     const card = gameState.deck.pop();
     if (card) {
       playerHand.push({ ...card, type: 'player' });
     }
   }
-  
+
   // Update turn to bot
   gameState.currentTurn = gameState.botId;
   await gameState.save();
@@ -578,15 +690,15 @@ const handlePlayerDraw = async (gameState, drawData) => {
 
 /**
  * Request a game with a bot
- * @param {string} playerId - Player ID
+ * @param {string} uid - Player ID
  * @param {Map} clients - WebSocket clients map
  */
-export const requestBotGame = async (playerId, clients) => {
-  const playerWs = clients.get(playerId);
+export const requestBotGame = async (uid, clients) => {
+  const playerWs = clients.get(uid);
   if (!playerWs) return;
-  
+
   const botPlayer = createBotPlayer();
-  const gameState = await startBotGame({ id: playerId }, botPlayer, clients);
-  
+  const gameState = await startBotGame({ id: uid }, botPlayer, clients);
+
   return gameState;
 };
