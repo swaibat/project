@@ -33,9 +33,6 @@ export const handleWebSocketConnection = (ws) => {
         case WebSocketMessageType.DRAW:
           await handleDraw(ws, data);
           break;
-        case WebSocketMessageType.SKIP:
-          await handleSkip(ws, data);
-          break;
         case WebSocketMessageType.WIN:
           await handleWin(ws, data);
           break;
@@ -151,52 +148,8 @@ const handleGameStart = async (ws, data) => {
 };
 
 const handleMove = async (ws, { data }) => {
-  const { to, from } = data;
-  console.log('to======', to,data);
+  const { gameId, from, to, cards, newSuit } = data;
 
-  const toPlayer = clients.get(to);
-  console.log('toPlayer======', toPlayer);
-
-  if (toPlayer) {
-    toPlayer.ws.send(
-      JSON.stringify({
-        type: WebSocketMessageType.MOVE,
-        data,
-      }),
-    );
-  }
-};
-
-const handleDraw = async (ws, { data }) => {
-  const { to } = data;
-  const toPlayer = clients.get(to);
-
-  if (toPlayer) {
-    toPlayer.ws.send(
-      JSON.stringify({
-        type: WebSocketMessageType.DRAW,
-        data,
-      }),
-    );
-  }
-};
-
-const handleSkip = async (ws, { data }) => {
-  const { to, from } = data;
-  const toPlayer = clients.get(to);
-
-  if (toPlayer) {
-    toPlayer.ws.send(
-      JSON.stringify({
-        type: WebSocketMessageType.SKIP,
-        data,
-      }),
-    );
-  }
-};
-
-const handleWin = async (ws, data) => {
-  const { gameId, uid } = data;
   const gameState = gameStates.get(gameId);
 
   if (!gameState) {
@@ -204,8 +157,127 @@ const handleWin = async (ws, data) => {
     return;
   }
 
-  gameState.winner = uid;
-  gameState.status = 'COMPLETED';
+  const playerCards = gameState.players[from];
+
+  if (!playerCards) {
+    ws.send(
+      JSON.stringify({ type: 'ERROR', message: 'Player not found in game' }),
+    );
+    return;
+  }
+  let gameOver = false;
+  // Process all actions in exact order
+  for (const action of cards.reverse()) {
+    if (action.type === 'DRAW') {
+      // Handle draw action
+      const drawnCards = gameState.deck.splice(0, action.count || 1);
+      gameState.players[from].push(...drawnCards);
+    } else {
+      // Validate and play card
+      const cardIndex = playerCards.findIndex((c) => c.id === action.id);
+      if (cardIndex === -1) {
+        ws.send(
+          JSON.stringify({
+            type: 'ERROR',
+            message: `Card not in hand`,
+          }),
+        );
+        return;
+      }
+      
+
+      // if (action.value === 7 && action.suit === gameState.cuttingCard.suit) {
+      //   gameOver = true;
+      // }
+      if (action.value === 7 || action.value === 13 || action.value === 12 ) {
+        gameOver = true;
+      }
+
+      // Update game state
+      if (newSuit) {
+        gameState.chosenSuit = newSuit;
+      }
+      gameState.players[from] = playerCards.filter((c) => c.id !== action.id);
+      gameState.playedCards.push(action);
+      gameState.currentCard = newSuit
+        ? { suit: newSuit, value: newSuit }
+        : action;
+    }
+  }
+  // Update turn to the specified 'to' player
+  // gameState.currentTurn = to;
+  gameStates.set(gameId, gameState);
+
+  console.log('===WINNER HANDLER===',{ from, to, cards, newSuit, gameOver });
+
+  // Notify opponent
+  const toPlayer = clients.get(to);
+  if (toPlayer) {
+    toPlayer.ws.send(
+      JSON.stringify({
+        type: WebSocketMessageType.MOVE,
+        data: { from, to, cards, newSuit, gameOver },
+      }),
+    );
+  }
+};
+
+const handleDraw = async (ws, { data }) => {
+  const { gameId, from, to, count } = data;
+
+  const gameState = gameStates.get(gameId);
+
+  if (!gameState) {
+    ws.send(JSON.stringify({ type: 'ERROR', message: 'Game not found' }));
+    return;
+  }
+
+  // Validate draw count (allow only 1, 2, 3, or 5)
+  const drawCount = [1, 2, 3, 5].includes(count) ? count : 1;
+
+  // Check if there are enough cards in the deck
+  if (gameState.deck.length < drawCount) {
+    ws.send(
+      JSON.stringify({
+        type: 'ERROR',
+        message: 'Not enough cards left in deck',
+      }),
+    );
+    return;
+  }
+
+  // Optimized draw: remove last N cards from deck
+  const drawnCards = gameState.deck.splice(-drawCount);
+
+  gameState.players[from].push(...drawnCards);
+
+  // Save updated state
+  gameStates.set(gameId, gameState);
+
+  // Notify the drawing player
+  const toPlayer = clients.get(to);
+  const response = {
+    type: WebSocketMessageType.DRAW,
+    gameState,
+    data: {
+      to,
+      count,
+    },
+  };
+
+  if (toPlayer) toPlayer.ws.send(JSON.stringify(response));
+};
+
+const handleWin = async (ws, data) => {
+  const { gameId, to, from, winner } = data;
+  const gameState = gameStates.get(gameId);
+
+  if (!gameState) {
+    ws.send(JSON.stringify({ type: 'ERROR', message: 'Game not found' }));
+    return;
+  }
+
+  gameState.winner = winner;
   gameStates.set(gameId, gameState);
 
   // Clean up player-game mappings
@@ -213,18 +285,24 @@ const handleWin = async (ws, data) => {
     playerGameMap.delete(player);
   }
 
-  broadcastToGame(gameId, {
+  const toPlayer = clients.get(to);
+  const response = {
     type: WebSocketMessageType.WIN,
-    gameState,
+    data: {
+      to,
+      winner,
+    },
+  };
+  console.log('===WINNER HANDLER===',{
+    to,
+    winner,
   });
+
+  if (toPlayer) toPlayer.ws.send(JSON.stringify(response));
 };
 
 const handleGameRequest = async (ws, data) => {
   const { user, opponent, stake } = data.data;
-  console.log('====================================');
-  console.log({ user, opponent });
-  console.log('====================================');
-
   // Check if either player is already in a game
   if (playerGameMap.has(user.uid) || playerGameMap.has(opponent.uid)) {
     ws.send(
@@ -266,9 +344,6 @@ const handleGameRequest = async (ws, data) => {
 };
 
 const handleGameRequestAccepted = async (ws, { data }) => {
-  console.log('=============data=======================');
-  console.log(data);
-  console.log('====================================');
   const { requestId } = data;
   const request = pendingRequests.get(requestId);
 
@@ -330,20 +405,6 @@ const handleGameRequestAccepted = async (ws, { data }) => {
     createdAt: new Date(),
   };
 
-  console.log('====', {
-    gameId,
-    players: playerHands,
-    status: 'ACTIVE',
-    userId: user.uid,
-    currentTurn: user.uid,
-    cuttingCard,
-    deck,
-    playedCards: [],
-    currentCard: null,
-    chosenSuit: null,
-    createdAt: new Date(),
-  });
-
   // Update player-game mappings
   playerGameMap.set(user.uid, gameId);
   playerGameMap.set(opponent.uid, gameId);
@@ -391,10 +452,6 @@ const handleOnlineUsersRequest = async (ws) => {
       stake,
     }));
 
-  const games = await GameState.find();
-
-  console.log('onlineUsers', games, onlineUsers);
-
   ws.send(
     JSON.stringify({
       type: WebSocketMessageType.ONLINE_USERS,
@@ -423,8 +480,6 @@ const broadcastOnlineUsers = async () => {
     }),
   );
 
-  console.log('======ONLINE_USERS', onlineUsers);
-
   const message = JSON.stringify({
     type: WebSocketMessageType.ONLINE_USERS,
     users: onlineUsers,
@@ -452,7 +507,6 @@ export {
   handleGameStart,
   handleMove,
   handleDraw,
-  handleSkip,
   handleWin,
   handleGameRequest,
   handleGameRequestAccepted,

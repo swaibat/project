@@ -20,9 +20,6 @@ export const handleWebSocketConnection = (ws) => {
         case WebSocketMessageType.DRAW:
           await handleDraw(ws, data);
           break;
-        case WebSocketMessageType.SKIP:
-          await handleSkip(ws, data);
-          break;
         case WebSocketMessageType.WIN:
           await handleWin(ws, data);
           break;

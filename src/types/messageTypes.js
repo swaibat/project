@@ -3,7 +3,6 @@ export const WebSocketMessageType = {
   START: 'START',
   MOVE: 'MOVE',
   DRAW: 'DRAW',
-  SKIP: 'SKIP',
   WIN: 'WIN',
   PING: 'PING',
   GAME_REQUEST: 'GAME_REQUEST',
