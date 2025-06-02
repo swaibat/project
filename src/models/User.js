@@ -19,6 +19,7 @@ const userSchema = new mongoose.Schema({
   fcmToken: { type: String, default: '' },
   bonusCoins: { type: Number, default: 0 },
   lastBonusTime: { type: Date, default: Date.now },
+  rank: { type: Object },
 });
 
 export default mongoose.model('User', userSchema);

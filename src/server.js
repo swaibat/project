@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 import { handleWebSocketConnection } from './websocket/wsHandler.js';
 import router from './routes/index.js';
 import { startBonusCron } from './utils/bonusCron.js';
+import Prize from './models/Prize.js';
 
 dotenv.config();
 
@@ -64,13 +65,34 @@ wss.on('connection', (ws) => {
 
 // MongoDB Connection
 
+app.use('/api', router);
+
+const seedDefaultPrize = async () => {
+  try {
+    const existing = await Prize.find({});
+    if (!existing.length) {
+      await Prize.create({}); // Uses default values from schema
+      console.log('✅ Default Prize data seeded.');
+    } else {
+      console.log('ℹ️ Prize data already exists. Skipping seeding.');
+    }
+  } catch (err) {
+    console.error('❌ Seeding error:', err);
+  }
+};
+
+// Connect to MongoDB and then start the server
 mongoose
   .connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/matatu')
-  .then(() => console.log('Connected to MongoDB'))
-  .catch((err) => console.error('MongoDB connection error:', err));
+  .then(async () => {
+    console.log('✅ Connected to MongoDB');
 
-// Routes
-app.use('/api', router);
+    // Run seeder only after successful connection
+    await seedDefaultPrize();
+  })
+  .catch((err) => {
+    console.error('❌ MongoDB connection error:', err);
+  });
 
 startBonusCron(activeConnections);
 

@@ -51,7 +51,7 @@ export const processBonusUpdates = async (req) => {
       await sendPushNotification(
         user.uid,
         `💰 You've Got Bonus Coin!`,
-        `You've earned 1 bonus coin! Tap to claim now!`,
+        `You've earned 25 bonus coins! Tap to claim now!`,
         { type: 'BONUS_AVAILABLE' },
       );
     }

@@ -7,8 +7,8 @@ export const updateBonusCoins = async (user) => {
   let bonusCoins = user.bonusCoins || 0;
 
   // Keep adding coins if enough time has passed and bonus is less than 4
-  while (now - lastBonus >= 5 * 60 * 60 * 1000 && bonusCoins < 1) {
-    bonusCoins += 1;
+  while (now - lastBonus >= 5 * 60 * 60 * 1000 && bonusCoins < 25) {
+    bonusCoins += 25;
     lastBonus += 5 * 60 * 60 * 1000; // Add 5 hours to last bonus time
   }
 
@@ -19,7 +19,7 @@ export const updateBonusCoins = async (user) => {
   }
 
   const nextBonusIn =
-    bonusCoins >= 4
+    bonusCoins >= 25
       ? null
       : Math.max(0, (5 * 60 * 60 * 1000 - (now - lastBonus)) / (1000 * 60 * 60)); // in hours
 
@@ -42,7 +42,7 @@ export const claimBonus = async (req, res) => {
   const { user } = req;
   try {
     if (user.bonusCoins > 0) {
-      user.balance += user.bonusCoins;
+      user.balance += 25;
       user.bonusCoins = 0;
       user.lastBonusTime = new Date();
       await user.save();
