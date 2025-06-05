@@ -1,6 +1,70 @@
 import User from '../models/User.js';
 import AccountCounter from '../models/AccountCounter.js';
 
+const handleNearbyPlayers = async (uid) => {
+  // Fetch top players sorted by points
+  const user = await User.findOne({ uid });
+
+  const users = await User.find()
+    .sort({ points: -1 })
+    .select('id uid username points') // Add `uid` for update
+    .exec();
+
+  const currentIndex = users.findIndex(
+    (u) => u.id.toString() === user.id.toString(),
+  );
+
+  if (currentIndex === -1) {
+    return { type: 'ERROR', message: 'User not found in leaderboard' };
+  }
+
+  const position = currentIndex + 1;
+
+  // Create nearby list (max 3 entries: one before, self, one after)
+  const nearby = [];
+
+  if (currentIndex > 0) {
+    const prev = users[currentIndex - 1];
+    nearby.push({
+      userId: prev.id,
+      username: prev.username,
+      points: prev.points,
+      position: currentIndex,
+    });
+  }
+
+  nearby.push({
+    userId: user.id,
+    username: user.username,
+    points: user.points,
+    position: position,
+  });
+
+  if (currentIndex < users.length - 1) {
+    const next = users[currentIndex + 1];
+    nearby.push({
+      userId: next.id,
+      username: next.username,
+      points: next.points,
+      position: currentIndex + 2,
+    });
+  }
+
+  // Update the current user's rank and position
+  const updated = await User.findOneAndUpdate(
+    { uid: user.uid },
+    {
+      $set: {
+        rank: nearby,
+        position,
+      },
+    },
+    { new: true }, // Return updated document
+  ).select('-password'); // Optional: exclude sensitive fields
+
+  return updated;
+};
+
 export const createUser = async (req, res) => {
   const { uid, username, email, photoURL } = req.body;
   try {
@@ -36,7 +100,7 @@ export const getUser = async (req, res) => {
   const { uid } = req.params;
 
   try {
-    const user = await User.findOne({ uid });
+    const user = await handleNearbyPlayers(uid);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     res.json(user);

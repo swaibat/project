@@ -1,10 +1,7 @@
 // WebSocketHandler.js
-import { GameState } from '../models/GameState.js';
 import { WebSocketMessageType } from '../types/messageTypes.js';
 import { initializeDeck } from '../utils/cardUtils.js';
 import { generateId } from './wsUtil.js';
-import { initialGameState } from './initialState.js';
-import WeeklyRanking from '../models/WeeklyRanking.js';
 import User from '../models/User.js';
 import { DateTime } from 'luxon';
 
@@ -17,42 +14,111 @@ const TURN_DURATION_MS = 30 * 1000;
 
 const TIMEOUT_DURATION = 30000; // 30 seconds
 
-function endGame(gameId, winner, loser, reason, additionalData = {}) {
+function scheduleTurnTimeout(gameId) {
+  const gameState = gameStates.get(gameId);
+  if (!gameState) return;
+
+  // Clear any existing timeout
+  if (gameState.turnTimeout) {
+    clearTimeout(gameState.turnTimeout);
+  }
+
+  const TIMEOUT_MS = 30 * 1000;
+
+  gameState.turnTimeout = setTimeout(() => {
+    const currentUid = gameState.currentTurn;
+    const currentPlayer = gameState.players[currentUid];
+
+    console.log(`Player ${currentUid} failed to play within timeout`);
+
+    // Optionally notify both users
+    broadcastToGame(gameId, {
+      type: WebSocketMessageType.TURN_TIMEOUT,
+      data: {
+        uid: currentUid,
+        message: 'Turn timeout. Player did not play in time.',
+      },
+    });
+
+    // Decide: auto-move, skip, or end game
+    handleTurnTimeout(gameId, currentUid);
+  }, TIMEOUT_MS);
+}
+
+async function endGame(gameId, winner, loser, reason, additionalData = {}) {
   const gameState = gameStates.get(gameId);
   console.log('GAME_OVER 0000');
   if (!gameState) return;
-  
-  // Clear any existing timeout
+
+  // Clear timeout if exists
   if (gameState.timeout) {
     clearTimeout(gameState.timeout);
     gameState.timeout = null;
   }
-  
-  // Prepare game over data
+
+  const { charge = 0, amount = 0, points = 0 } = gameState.stake || {};
+  handleNearbyPlayers(winner)
+  handleNearbyPlayers(loser)
+
+  // Update balances
+  try {
+    const [winnerUser, loserUser] = await Promise.all([
+      User.findOne({ uid: winner }),
+      User.findOne({ uid: loser }),
+    ]);
+
+    if (winnerUser) {
+      winnerUser.balance += amount - charge;
+      winnerUser.points += points;
+      winnerUser.gamesPlayed += 1;
+      winnerUser.gamesWon += 1;
+      winnerUser.winRate = Math.round(
+        (winnerUser.gamesWon / winnerUser.gamesPlayed) * 100,
+      );
+      winnerUser.lastPlayed = new Date();
+      await winnerUser.save();
+    }
+
+    if (loserUser) {
+      console.log('=============loserUser.balance -= amount + charge;=======================');
+      console.log(loserUser.balance, amount + charge);
+      console.log('====================================');
+      loserUser.balance -= amount + charge;
+      loserUser.points += points;
+      loserUser.gamesPlayed += 1;
+      loserUser.winRate = Math.round(
+        (loserUser.gamesWon / loserUser.gamesPlayed) * 100,
+      );
+      loserUser.lastPlayed = new Date();
+      await loserUser.save();
+    }
+  } catch (err) {
+    console.error('Failed to update balances:', err);
+  }
+
+  // Notify players
   const gameOverData = {
     winner,
     loser,
     reason,
-    ...additionalData
+    stake: gameState.stake,
+    ...additionalData,
   };
-  
-  // Notify all players
+
   const allPlayers = Object.keys(gameState.players);
-  allPlayers.forEach(playerId => {
-    const player = clients.get(playerId);
-    if (player) {
-      console.log('GAME_OVER 111111111');
-      
-      player.ws.send(
+  allPlayers.forEach((playerId) => {
+    const client = clients.get(playerId);
+    if (client) {
+      client.ws.send(
         JSON.stringify({
           type: WebSocketMessageType.GAME_OVER,
-          data: gameOverData
-        })
+          data: gameOverData,
+        }),
       );
     }
   });
-  
-  // Clean up the game after a brief delay
+
+  // Clean up game state
   setTimeout(() => {
     gameStates.delete(gameId);
   }, 5000);
@@ -61,25 +127,24 @@ function endGame(gameId, winner, loser, reason, additionalData = {}) {
 function startTimeout(gameId) {
   const gameState = gameStates.get(gameId);
   if (!gameState) return;
-  
+
   // Clear any existing timeout
   if (gameState.timeout) {
     clearTimeout(gameState.timeout);
   }
-  
+
   gameState.timeout = setTimeout(() => {
     const inactivePlayer = gameState.currentTurn;
     const allPlayers = Object.keys(gameState.players);
-    const opponent = allPlayers.find(playerId => playerId !== inactivePlayer);
-    
+    const opponent = allPlayers.find((playerId) => playerId !== inactivePlayer);
+
     // End game due to timeout
     endGame(gameId, opponent, inactivePlayer, 'TIMEOUT');
   }, TIMEOUT_DURATION);
-  
+
   // Update the game state with new timeout
   gameStates.set(gameId, gameState);
 }
-
 
 // Helper function to get the start of the current week
 const getWeekStart = (date = DateTime.now().setZone('Africa/Nairobi')) => {
@@ -208,12 +273,11 @@ export const handleWebSocketConnection = (ws) => {
           // await handleNearbyPlayers(ws, data);
           break;
         case WebSocketMessageType.PLAYER_READY:
-          console.log('===PLAYER_READY====', data);
           await handlePlayerReady(ws, data);
           break;
         case WebSocketMessageType.GAME_REQUEST_ACCEPTED:
           console.log('GAME_REQUEST_ACCEPTED', data);
-          
+
           await handleGameRequestAccepted(ws, data);
           break;
         case WebSocketMessageType.GAME_REQUEST_DECLINED:
@@ -261,40 +325,47 @@ const handleIdentify = async (ws, { data }) => {
     const gameState = gameStates.get(gameId);
 
     if (gameState) {
-      sendToClient(ws, {
-        type: WebSocketMessageType.IDENTIFY,
-        gameState,
-      });
+      const now = Date.now();
+      const isExpired =
+        gameState.turnExpiresAt && now > gameState.turnExpiresAt;
+      const isInvalidReadyState = gameState.ready && gameState.ready.size !== 2;
 
-      registerClient(uid, playerData);
-      console.log(`Player ${uid} reconnected to existing game ${gameId}`);
-      console.log('=====1=====', 1);
-      return;
+      if (isExpired) {
+        // Clean up the expired/invalid game
+        console.log(
+          `Cleaning up ${isExpired ? 'expired' : 'invalid'} game ${gameId}`,
+        );
+
+        clients.set(uid, { ws, username, balance, stake, avatar });
+        ws.uid = uid;
+        ws.send(
+          JSON.stringify({
+            type: WebSocketMessageType.IDENTIFY,
+          }),
+        );
+
+        // Cleanup game state
+        gameStates.delete(gameId);
+        await broadcastOnlineUsers();
+        return;
+      } else {
+        // Game is valid, proceed with reconnection
+        sendToClient(ws, {
+          type: WebSocketMessageType.IDENTIFY,
+          gameState,
+        });
+
+        registerClient(uid, playerData);
+        console.log(`Player ${uid} reconnected to valid game ${gameId}`);
+        return;
+      }
     }
-
-    console.log('=====2=====', 2);
 
     // Cleanup stale mapping if game no longer exists
     playerGameMap.delete(uid);
   }
 
-  console.log('=====3=====', 3);
-
-  // New or resumed session — Initialize with initialGameState
-  // const newGameId = initialGameState.gameId;
-  // gameStates.set(newGameId, initialGameState);
-  // playerGameMap.set(uid, newGameId);
-
-  // registerClient(uid, playerData);
-
-  // sendToClient(ws, {
-  //   type: WebSocketMessageType.IDENTIFY,
-  //   gameState: initialGameState,
-  // });
-
-  // sendIdentifyMessage(ws, playerData);
-
-  // console.log(`Player ${uid} started or resumed new game ${newGameId}`);
+  // New connection or cleaned up invalid game
   clients.set(uid, { ws, username, balance, stake, avatar });
   ws.uid = uid;
   ws.send(
@@ -307,38 +378,76 @@ const handleIdentify = async (ws, { data }) => {
   await broadcastOnlineUsers();
 };
 
+// Helper function to clean up game resources
+function cleanupGame(gameId) {
+  // Remove all players from playerGameMap
+  const gameState = gameStates.get(gameId);
+  if (gameState) {
+    gameState.players.forEach((player) => {
+      playerGameMap.delete(player.uid);
+    });
+  }
+
+  // Any other cleanup needed for the game
+}
+
 const handlePlayerReady = async (ws, { data }) => {
   const { gameId, uid } = data;
-  const turnExpiresAt = Date.now() + 30 * 1000;
+  const turnExpiresAt = Date.now() + TIMEOUT_DURATION;
 
   const gameState = gameStates.get(gameId);
 
   if (!gameState || !gameState.players[uid]) {
-    ws.send(
-      JSON.stringify({ type: 'ERROR', message: 'Invalid game or player' }),
-    );
+    ws.send(JSON.stringify({ type: 'ERROR', message: 'Invalid game or player' }));
     return;
   }
 
-  gameState.turnExpiresAt = turnExpiresAt;
-
   // Mark this player as ready
   gameState.ready.add(uid);
-  // Check if both players are ready
-  // const allReady = Object.values(gameState.ready).every((r) => r === true);
+
   const allReady = gameState.ready.size === 2;
-  
-  if (allReady) {
-    (gameState.status = 'STARTED'), (gameState.turnExpiresAt = turnExpiresAt);
+
+  // If both players are ready and game hasn't started
+  if (allReady && gameState.status !== 'STARTED') {
+    gameState.status = 'STARTED';
+    gameState.turnExpiresAt = turnExpiresAt;
+
+    // Clear waiting timeout
+    if (gameState.waitTimeout) {
+      clearTimeout(gameState.waitTimeout);
+      gameState.waitTimeout = null;
+    }
+
+    // Set move timeout (for player not making a move)
+    if (!gameState.moveTimeout) {
+      gameState.moveTimeout = setTimeout(() => {
+        const currentTurnPlayer = gameState.currentTurn;
+        const otherPlayer = Object.keys(gameState.players).find((id) => id !== currentTurnPlayer);
+
+        console.log(`Player ${currentTurnPlayer} timed out`);
+        endGame(gameId, otherPlayer, currentTurnPlayer, 'TIMEOUT');
+      }, TIMEOUT_DURATION);
+    }
+
     // Notify both players the game is starting
     broadcastToGame(gameId, {
       type: WebSocketMessageType.START,
       data: {
         gameId,
         currentTurn: gameState.currentTurn,
-        turnExpiresAt: turnExpiresAt,
+        turnExpiresAt,
       },
     });
+
+    return;
+  }
+
+  // If only one player is ready, set a wait timeout (only once)
+  if (gameState.ready.size === 1 && !gameState.waitTimeout) {
+    gameState.waitTimeout = setTimeout(() => {
+      console.log(`Second player did not join in time for game ${gameId}`);
+      endGame(gameId, uid, null, 'OPPONENT_NO_SHOW');
+    }, TIMEOUT_DURATION);
   }
 };
 
@@ -351,15 +460,6 @@ const sendToClient = (ws, message) => {
   ws.send(JSON.stringify(message));
 };
 
-const sendIdentifyMessage = (
-  ws,
-  { username, balance, stake, avatar, rank },
-) => {
-  sendToClient(ws, {
-    type: WebSocketMessageType.IDENTIFY,
-    data: { username, balance, stake, avatar, rank },
-  });
-};
 
 const handleUpdateStake = async (ws, { data }) => {
   const { uid, stake } = data;
@@ -401,116 +501,136 @@ const handleGameStart = async (ws, data) => {
 const handleMove = async (ws, { data }) => {
   const { gameId, from, to, cards, newSuit } = data;
   const gameState = gameStates.get(gameId);
-  
+
+  // Basic game state validations
   if (!gameState) {
     ws.send(JSON.stringify({ type: 'ERROR', message: 'Game not found' }));
     return;
   }
-  
-  const playerCards = gameState.players[from];
-  if (!playerCards) {
+
+  if (!gameState.players[from]) {
     ws.send(
       JSON.stringify({ type: 'ERROR', message: 'Player not found in game' }),
     );
     return;
   }
-  
-  // Verify it's the player's turn
+
   if (gameState.currentTurn !== from) {
     ws.send(JSON.stringify({ type: 'ERROR', message: 'Not your turn' }));
     return;
   }
-  
-  console.log('=======data=====', data);
-  
-  // Process all actions in exact order
+
+  let cuttingCardPlayed = false;
+
+  // Validate and process all actions
   for (const action of cards) {
     if (action.type === 'DRAW') {
-      const drawCount = Math.min(action.count || 1, gameState.deck.length);
+      // Validate deck has enough cards
+      const drawCount = action.count || 1;
+      if (gameState.deck.length < drawCount) {
+        ws.send(
+          JSON.stringify({
+            type: 'ERROR',
+            message: `Cannot draw ${drawCount} cards (only ${gameState.deck.length} left)`,
+          }),
+        );
+        return;
+      }
+
       const drawnCards = gameState.deck.splice(-drawCount);
       gameState.players[from].push(...drawnCards);
     } else {
-      // Update game state for played card
+      // Validate player has the card they're trying to play
+      const cardExists = gameState.players[from].some(
+        (c) => c.v === action.v && c.s === action.s,
+      );
+
+      if (!cardExists) {
+        ws.send(
+          JSON.stringify({
+            type: 'ERROR',
+            message: `Card ${action.s}-${action.v} not found in player's hand`,
+          }),
+        );
+        return;
+      }
+
+      // Check for cutting card
+      if (action.v === 7 && action.s === gameState.cuttingCard.s) {
+        cuttingCardPlayed = true;
+      }
+
+      // Update game state
       if (newSuit) {
         gameState.chosenSuit = newSuit;
       }
-      
-      gameState.players[from] = playerCards.filter((c) => c.id !== action.id);
+
+      gameState.players[from] = gameState.players[from].filter(
+        (c) => c.v !== action.v || c.s !== action.s,
+      );
       gameState.playedCards.push(action);
       gameState.currentCard = newSuit
         ? { suit: newSuit, value: newSuit }
         : action;
     }
   }
-  
-  // Check for game over conditions
+
+  // Game over conditions
   if (gameState.players[from].length === 0) {
-    // Player won by running out of cards
-    const opponent = Object.keys(gameState.players).find(id => id !== from);
-    endGame(gameId, from, opponent, 'NO_CARDS', { finalMove: { from, to, cards, newSuit } });
+    const opponent = Object.keys(gameState.players).find((id) => id !== from);
+    endGame(gameId, from, opponent, 'NO_CARDS', {
+      finalMove: { from, to, cards, newSuit },
+    });
     return;
   }
-  
-  // Check if cutting card was played
-  let cuttingCardPlayed = false;
-  for (const action of cards) {
-    if (action.type !== 'DRAW' && action.value === 7 && action.suit === gameState.cuttingCard.suit) {
-      cuttingCardPlayed = true;
-      break;
-    }
-  }
-  
+
   if (cuttingCardPlayed) {
-    // Game ends when cutting card is played - determine winner based on total card values
     const allPlayers = Object.keys(gameState.players);
-  
-    const playerCardSums = allPlayers.map(id => {
-      const hand = gameState.players[id];
-      const totalValue = hand.reduce((sum, card) => sum + Number(card.value), 0);
-      return { id, totalValue };
-    });
-  
-    // Lower total value wins
+    const playerCardSums = allPlayers.map((id) => ({
+      id,
+      totalValue: gameState.players[id].reduce(
+        (sum, card) => sum + Number(card.v),
+        0,
+      ),
+    }));
+
     playerCardSums.sort((a, b) => a.totalValue - b.totalValue);
-    const winner = playerCardSums[0].id;
-    const loser = playerCardSums[1].id;
-  
-    endGame(gameId, winner, loser, 'CUTTING_CARD', {
-      finalMove: { from, to, cards, newSuit }
-    });
+    endGame(
+      gameId,
+      playerCardSums[0].id,
+      playerCardSums[1].id,
+      'CUTTING_CARD',
+      { finalMove: { from, to, cards, newSuit } },
+    );
     return;
   }
-  
-  // Game continues - update turn and start timeout
+
+  // Continue game
   gameState.currentTurn = to;
   startTimeout(gameId);
-  
-  // Set turn expiration time for client reference
+
   const turnExpiresAt = Date.now() + TIMEOUT_DURATION;
   gameState.turnExpiresAt = turnExpiresAt;
-  
-  // Update game state
   gameStates.set(gameId, gameState);
-  
-  // Send regular MOVE event for ongoing game
-  const allPlayers = Object.keys(gameState.players);
-  allPlayers.forEach(playerId => {
+
+  console.log('====gameState==', gameState);
+
+  const { timeout, ...newGameState } = gameState;
+  // Notify all players
+  Object.keys(gameState.players).forEach((playerId) => {
     const player = clients.get(playerId);
-    if (player) {
-      player.ws.send(
-        JSON.stringify({
-          type: WebSocketMessageType.MOVE,
-          data: { 
-            from, 
-            to, 
-            cards, 
-            newSuit, 
-            turnExpiresAt,
-            currentTurn: gameState.currentTurn
-          },
-        }),
-      );
-    }
+    player?.ws.send(
+      JSON.stringify({
+        type: WebSocketMessageType.MOVE,
+        data: {
+          from,
+          to,
+          cards,
+          newSuit,
+          gameState: newGameState,
+        },
+      }),
+    );
   });
 };
 
@@ -523,7 +643,6 @@ const handleDraw = async (ws, { data }) => {
     ws.send(JSON.stringify({ type: 'ERROR', message: 'Game not found' }));
     return;
   }
-  
 
   // Validate draw count (allow only 1, 2, 3, or 5)
   const drawCount = [1, 2, 3, 5].includes(count) ? count : 1;
@@ -655,8 +774,6 @@ const handleGameRequestAccepted = async (ws, { data }) => {
 
   const { user, opponent } = request;
 
-
-
   // Double check players aren't in other games (race condition)
   if (playerGameMap.has(user.uid) || playerGameMap.has(opponent.uid)) {
     ws.send(
@@ -668,7 +785,7 @@ const handleGameRequestAccepted = async (ws, { data }) => {
     return;
   }
 
-  if(opponent.balance < opponent.stake.amount + opponent.stake.charge){
+  if (opponent.balance < opponent.stake.amount + opponent.stake.charge) {
     ws.send(
       JSON.stringify({
         type: 'ERROR',
@@ -709,7 +826,7 @@ const handleGameRequestAccepted = async (ws, { data }) => {
     currentCard: null,
     chosenSuit: null,
     createdAt: new Date(),
-    stake:opponent.stake,
+    stake: opponent.stake,
     // 👇 Added meta data
     meta: {
       [user.uid]: {
@@ -790,7 +907,7 @@ const handleDisconnect = async (ws) => {
 };
 
 // New handler for nearby players
-const handleNearbyPlayers = async (uid, ws) => {
+const handleNearbyPlayers = async (uid) => {
   const user = await User.findOne({ uid }).exec();
   if (!user) {
     return { type: 'ERROR', message: 'User not found' };
