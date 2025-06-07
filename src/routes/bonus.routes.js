@@ -1,5 +1,5 @@
-import  express from 'express';
-import { getBonusStatus, claimBonus } from '../controllers/bonus.controller.js';
+import express from 'express';
+import { getBonusStatus, claimBonus } from '../controllers/bonus.controller';
 
 const router = express.Router();
 

@@ -1,10 +1,10 @@
 import express from 'express';
-import userRoutes from './user.routes.js';
-import paymentRoutes from './payment.routes.js';
-import transactionRoutes from './transaction.routes.js';
-import bonusRoutes from './bonus.routes.js';
-import prizesRoutes from './prizes.routes.js';
-import { verifyToken } from '../middleware/auth.js';
+import userRoutes from './user.routes';
+import paymentRoutes from './payment.routes';
+import transactionRoutes from './transaction.routes';
+import bonusRoutes from './bonus.routes';
+import prizesRoutes from './prizes.routes';
+import { verifyToken } from '../middleware/auth';
 
 const router = express.Router();
 

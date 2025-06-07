@@ -4,10 +4,10 @@ import { createServer } from 'http';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { handleWebSocketConnection } from './websocket/wsHandler.js';
-import router from './routes/index.js';
-import { startBonusCron } from './utils/bonusCron.js';
-import Prize from './models/Prize.js';
+import { handleWebSocketConnection } from './websocket/wsHandler';
+import router from './routes/index';
+import { startBonusCron } from './utils/bonusCron';
+import Prize from './models/Prize';
 
 dotenv.config();
 

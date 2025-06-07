@@ -3,8 +3,8 @@ import {
   processDeposit,
   handlePaymentWebhook,
   withdrawMoney,
-} from '../controllers/payment.controller.js';
-import { verifyToken } from '../middleware/auth.js';
+} from '../controllers/payment.controller';
+import { verifyToken } from '../middleware/auth';
 
 const router = express.Router();
 

@@ -1,5 +1,5 @@
 import express from 'express';
-import Prize from '../models/Prize.js';
+import Prize from '../models/Prize';
 
 const router = express.Router();
 
@@ -23,7 +23,6 @@ router.post('/', async (req, res) => {
     res.status(500).json({ error: 'Failed to replace prizes.' });
   }
 });
-
 
 router.get('/', async (req, res) => {
   try {

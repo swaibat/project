@@ -1,4 +1,4 @@
-import User from '../models/User.js';
+import User from '../models/User';
 
 export const updateBonusCoins = async (user) => {
   const now = Date.now();
@@ -21,7 +21,10 @@ export const updateBonusCoins = async (user) => {
   const nextBonusIn =
     bonusCoins >= 25
       ? null
-      : Math.max(0, (5 * 60 * 60 * 1000 - (now - lastBonus)) / (1000 * 60 * 60)); // in hours
+      : Math.max(
+          0,
+          (5 * 60 * 60 * 1000 - (now - lastBonus)) / (1000 * 60 * 60),
+        ); // in hours
 
   return {
     bonusCoins: user.bonusCoins,

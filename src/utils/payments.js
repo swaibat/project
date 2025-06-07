@@ -1,6 +1,6 @@
 import axios from 'axios';
-import User from '../models/User.js';
-import Transaction from '../models/Transaction.js';
+import User from '../models/User';
+import Transaction from '../models/Transaction';
 
 const formatMsisdn = (phone) => {
   if (phone.startsWith('0')) {

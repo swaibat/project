@@ -1,5 +1,5 @@
-import User from '../models/User.js';
-import AccountCounter from '../models/AccountCounter.js';
+import User from '../models/User';
+import AccountCounter from '../models/AccountCounter';
 
 const handleNearbyPlayers = async (uid) => {
   // Fetch top players sorted by points

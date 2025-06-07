@@ -2,7 +2,7 @@ import express from 'express';
 import {
   getTransactions,
   getTransactionDetails,
-} from '../controllers/transaction.controller.js';
+} from '../controllers/transaction.controller';
 
 const router = express.Router();
 

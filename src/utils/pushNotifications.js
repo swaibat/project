@@ -1,5 +1,5 @@
-import admin from '../firebase/config.js';
-import User from '../models/User.js';
+import admin from '../firebase/config';
+import User from '../models/User';
 
 export async function sendPushNotification(userId, title, body, data = {}) {
   try {

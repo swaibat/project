@@ -1,6 +1,6 @@
 // Update your bonusCron.js to accept activeConnections
 import cron from 'node-cron';
-import { processBonusUpdates } from '../services/bonusService.js';
+import { processBonusUpdates } from '../services/bonusService';
 import express from 'express';
 
 export const startBonusCron = (activeConnections) => {

@@ -16,4 +16,5 @@ export const WebSocketMessageType = {
   NEARBY_PLAYERS: 'NEARBY_PLAYERS',
   PLAYER_READY: 'PLAYER_READY',
   GAME_OVER: 'GAME_OVER',
+  START: 'START',
 };

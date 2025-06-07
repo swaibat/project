@@ -1,5 +1,5 @@
-import Transaction from '../models/Transaction.js';
-import User from '../models/User.js';
+import Transaction from '../models/Transaction';
+import User from '../models/User';
 
 export const depositApi = async ({ amount, provider, transactionId }) => {
   try {

@@ -1,6 +1,6 @@
 // services/bonusService.js
-import User from '../models/User.js';
-import { sendPushNotification } from '../utils/pushNotifications.js';
+import User from '../models/User';
+import { sendPushNotification } from '../utils/pushNotifications';
 
 const BONUS_INTERVAL_MS = 1000; // 5 hours
 const MAX_BONUS_COINS = 1;
@@ -43,8 +43,8 @@ export const processBonusUpdates = async (req) => {
           type: 'BONUS_UPDATE',
           data: {
             bonusCoins: user.bonusCoins,
-            lastBonusTime: user.lastBonusTime
-          }
+            lastBonusTime: user.lastBonusTime,
+          },
         });
       }
 

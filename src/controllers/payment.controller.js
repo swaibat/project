@@ -1,7 +1,7 @@
-import { mobileMoneyPayment, sendPayment } from '../utils/payments.js';
-import { depositApi, depositFailed } from '../utils/depositApi.js';
-import { WebSocketMessageType } from '../types/messageTypes.js';
-import { sendPushNotification } from '../utils/pushNotifications.js';
+import { mobileMoneyPayment, sendPayment } from '../utils/payments';
+import { depositApi, depositFailed } from '../utils/depositApi';
+import { WebSocketMessageType } from '../types/messageTypes';
+import { sendPushNotification } from '../utils/pushNotifications';
 
 export const processDeposit = async (req, res) => {
   try {
@@ -76,7 +76,7 @@ export const handlePaymentWebhook = async (req, res) => {
           transactionId: customer_reference,
           reason: message,
           timestamp: new Date().toISOString(),
-          message: "Your payment didn’t go through. Try again.",
+          message: 'Your payment didn’t go through. Try again.',
           title: 'Deposit Failed!',
           data: {
             type: 'transaction',
@@ -107,7 +107,6 @@ export const handlePaymentWebhook = async (req, res) => {
 };
 
 const sendTransactionNotification = async (req, userId, payload) => {
-
   req.sendToUser(userId, payload);
 
   await sendPushNotification(

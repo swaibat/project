@@ -1,6 +1,6 @@
 import { OAuth2Client } from 'google-auth-library';
-import User from '../models/User.js';
-import admin from '../firebase/config.js';
+import User from '../models/User';
+import admin from '../firebase/config';
 
 const client = new OAuth2Client(process.env.CLIENT_ID);
 
@@ -17,7 +17,9 @@ export const verifyToken = async (req, res, next) => {
     const email = decodedToken.email;
 
     if (!email) {
-      return res.status(401).json({ error: 'Invalid token payload (missing email)' });
+      return res
+        .status(401)
+        .json({ error: 'Invalid token payload (missing email)' });
     }
 
     // Fetch user from MongoDB
