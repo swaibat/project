@@ -1,9 +1,10 @@
 import { WebSocket } from 'ws';
 import { WebSocketMessageType } from '../../types/messageTypes';
 import { broadcastOnlineUsers } from './broadcastOnlineUsers';
-import { clients, playerGameMap } from '../state';
+import { clients, gameStates, playerGameMap } from '../state';
 import { registerClient, sendToClient } from '../wsUtil';
 import { GameStatesMap, PlayerData } from '../types';
+import { log } from 'console';
 
 export interface IdentifyData extends PlayerData {
   gameStates: GameStatesMap;
@@ -19,14 +20,15 @@ export const handleIdentify = async ({
   ws,
   data,
 }: HandleIdentifyProps): Promise<void> => {
-  const { uid, username, balance, stake, avatar, gameStates } = data;
+  const { uid, username, balance, stake, avatar } = data;
 
   const playerData = { ws, username, balance, stake, avatar, uid };
 
   const gameId = playerGameMap.get(uid);
   // Reconnection case
   if (playerGameMap.has(uid) && gameId) {
-    const gameState = gameStates.get(gameId);
+    const oldGameState = gameStates.get(gameId);
+    const { waitTimeout, moveTimeout, ...gameState } = oldGameState;
 
     if (gameState) {
       const now = Date.now();
@@ -48,7 +50,7 @@ export const handleIdentify = async ({
           balance,
           stake,
           avatar,
-          uid
+          uid,
         });
 
         ws.send(
@@ -67,12 +69,12 @@ export const handleIdentify = async ({
           ws,
           message: {
             type: WebSocketMessageType.IDENTIFY,
-            gameState,
+            data: { gameState },
           },
         });
 
         playerData.ws.uid = uid;
-   
+
         registerClient(playerData);
         console.log(`Player ${uid} reconnected to valid game ${gameId}`);
         return;
@@ -91,7 +93,7 @@ export const handleIdentify = async ({
     balance,
     stake,
     avatar,
-    uid
+    uid,
   });
 
   ws.send(

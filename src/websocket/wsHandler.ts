@@ -10,14 +10,16 @@ import { handleOnlineUsersRequest } from './handlers/handleOnlineUsersRequest';
 import { handlePlayerReady } from './handlers/handlePlayerReady';
 import { handleUpdateStake } from './handlers/handleUpdateStake';
 import { handleDisconnect } from './wsUtil';
+import { WebSocket } from 'ws';
 
-export const handleWebSocketConnection = (ws) => {
+export const handleWebSocketConnection = (ws: WebSocket) => {
   console.log('New client connected');
-  ws.on('message', async (message) => {
+  ws.on('message', async (message: string) => {
     try {
-      const data = JSON.parse(message);
+      const payload = JSON.parse(message);
+      const data = payload.data;
 
-      switch (data.type) {
+      switch (payload.type) {
         case WebSocketMessageType.IDENTIFY:
           await handleIdentify({ ws, data });
           break;

@@ -100,56 +100,42 @@ interface HandleDisconnectProps {
 export const handleDisconnect = async ({
   ws,
 }: HandleDisconnectProps): Promise<void> => {
-  if (ws.uid) {
+  if (ws?.uid) {
     clients.delete(ws.uid);
     console.log(`Player ${ws.uid} disconnected`);
     await broadcastOnlineUsers();
   }
 };
 
-export const startTimeout = (gameId) => {
+export const startTimeout = (gameId: string) => {
   const gameState = gameStates.get(gameId);
   if (!gameState) return;
 
-  // Clear any existing timeout
+  // Always clear existing move timeout
   if (gameState.moveTimeout) {
     clearTimeout(gameState.moveTimeout);
-    gameState.moveTimeout = setTimeout(() => {
-      const inactivePlayer = gameState.currentTurn;
-      const allPlayers = Object.keys(gameState.players);
-      const opponent = allPlayers.find(
-        (playerId) => playerId !== inactivePlayer,
-      );
-
-      // End game due to timeout
-      endGame({
-        gameId,
-        winner: opponent!,
-        loser: inactivePlayer,
-        reason: 'TIMEOUT',
-      });
-    }, PLAY_TIMEOUT_DURATION);
   }
 
+  gameState.moveTimeout = setTimeout(() => {
+    const inactivePlayer = gameState.currentTurn;
+    const opponent = Object.keys(gameState.players).find(
+      (playerId) => playerId !== inactivePlayer,
+    );
+
+    console.log(`Player ${inactivePlayer} timed out`);
+    endGame({
+      gameId,
+      winner: opponent!,
+      loser: inactivePlayer,
+      reason: 'TIMEOUT',
+    });
+  }, PLAY_TIMEOUT_DURATION);
+
+  // Also clear waitTimeout if it exists (you might want to extract this separately)
   if (gameState.waitTimeout) {
     clearTimeout(gameState.waitTimeout);
-    gameState.waitTimeout = setTimeout(() => {
-      const inactivePlayer = gameState.currentTurn;
-      const allPlayers = Object.keys(gameState.players);
-      const opponent = allPlayers.find(
-        (playerId) => playerId !== inactivePlayer,
-      );
-
-      // End game due to timeout
-      endGame({
-        gameId,
-        winner: opponent!,
-        loser: inactivePlayer,
-        reason: 'TIMEOUT',
-      });
-    }, PLAY_TIMEOUT_DURATION);
+    gameState.waitTimeout = null;
   }
 
-  // Update the game state with new timeout
-  gameStates.set(gameId, gameState);
+  gameStates.set(gameId, gameState); // Update state
 };

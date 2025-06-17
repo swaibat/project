@@ -20,7 +20,7 @@ interface HandleGameRequestAcceptedProps {
 // Implementation
 export const handleGameRequestAccepted = async ({
   ws,
-  data
+  data,
 }: HandleGameRequestAcceptedProps): Promise<void> => {
   const { requestId } = data;
   const request = pendingRequests.get(requestId);
@@ -117,8 +117,10 @@ export const handleGameRequestAccepted = async ({
 
   const response = {
     type: WebSocketMessageType.GAME_REQUEST_ACCEPTED,
-    gameId,
-    gameState,
+    data: {
+      gameId,
+      gameState,
+    },
   };
 
   fromPlayer.ws.send(JSON.stringify(response));

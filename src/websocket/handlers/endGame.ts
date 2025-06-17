@@ -1,6 +1,6 @@
 import User from '../../models/User';
 import { WebSocketMessageType } from '../../types/messageTypes';
-import { clients, gameStates } from '../state';
+import { clients, gameStates, playerGameMap, } from '../state';
 import { handleNearbyPlayers } from './handleNearbyPlayers';
 
 interface EndGameProps {
@@ -22,6 +22,9 @@ export const endGame = async ({
   const gameState = gameStates.get(gameId);
   console.log('GAME_OVER 0000');
   if (!gameState) return;
+
+  playerGameMap.delete(winner)
+  playerGameMap.delete(loser!)
 
   // Clear timeout if exists
   if (gameState.moveTimeout) {

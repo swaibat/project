@@ -11,11 +11,10 @@ interface PlayerReadyData {
   uid: string;
 }
 
-
 // Implementation
 export const handlePlayerReady = async ({
   ws,
-  data
+  data,
 }: WsProps): Promise<void> => {
   const { gameId, uid } = data;
   const turnExpiresAt = Date.now() + PLAY_TIMEOUT_DURATION;
@@ -52,7 +51,6 @@ export const handlePlayerReady = async ({
         const otherPlayer = Object.keys(gameState.players).find(
           (id) => id !== currentTurnPlayer,
         )!;
-        
 
         console.log(`Player ${currentTurnPlayer} timed out`);
         endGame({
@@ -63,7 +61,7 @@ export const handlePlayerReady = async ({
         });
       }, PLAY_TIMEOUT_DURATION);
     }
-
+    const { moveTimeout, waitTimeout, ...newGameState } = gameState;
     // Notify both players the game is starting
     broadcastToGame({
       gameId,
@@ -73,6 +71,7 @@ export const handlePlayerReady = async ({
           gameId,
           currentTurn: gameState.currentTurn,
           turnExpiresAt,
+          gameState: newGameState,
         },
       },
     });

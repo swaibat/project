@@ -54,6 +54,7 @@ export interface GameState {
   waitTimeout?: NodeJS.Timeout | null;
   moveTimeout?: NodeJS.Timeout | null;
   stake: GameStake;
+  activePenaltyCount?: number;
   meta: {
     [uid: string]: {
       username: string;
