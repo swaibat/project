@@ -1,3 +1,4 @@
+import { updateBattleStatusByRequestId } from '../../controllers/battle.controller';
 import { WebSocketMessageType } from '../../types/messageTypes';
 import { initializeDeck } from '../../utils/cardUtils';
 import { clients, gameStates, pendingRequests, playerGameMap } from '../state';
@@ -41,7 +42,7 @@ export const handleGameRequestAccepted = async ({
 
   pendingRequests.delete(requestId);
 
-  const { user, opponent } = request;
+  const { user, opponent, isBattle } = request;
 
   // Double check players aren't in other games (race condition)
   if (playerGameMap.has(user.uid) || playerGameMap.has(opponent.uid)) {
@@ -54,15 +55,29 @@ export const handleGameRequestAccepted = async ({
     return;
   }
 
-  if (opponent.balance < opponent.stake.amount + opponent.stake.charge) {
-    ws.send(
-      JSON.stringify({
-        type: 'ERROR',
-        message: 'opponent low balance',
-      }),
-    );
-    return;
+  if (!isBattle) {
+    if (opponent.balance < opponent.stake.amount + opponent.stake.charge) {
+      ws.send(
+        JSON.stringify({
+          type: 'ERROR',
+          message: 'opponent low balance',
+        }),
+      );
+      return;
+    }
   }
+  //
+  // else {
+  //   if (opponent.balance < opponent.stake.amount + opponent.stake.charge) {
+  //     ws.send(
+  //       JSON.stringify({
+  //         type: 'ERROR',
+  //         message: 'opponent low balance',
+  //       }),
+  //     );
+  //     return;
+  //   }
+  // }
 
   const fromPlayer = clients.get(user.uid);
   const toPlayer = clients.get(opponent.uid);
@@ -81,6 +96,7 @@ export const handleGameRequestAccepted = async ({
     user.uid,
     opponent.uid,
   ]);
+
   const gameId = generateId();
   const gameState: GameState = {
     gameId,
@@ -96,6 +112,7 @@ export const handleGameRequestAccepted = async ({
     chosenSuit: null,
     createdAt: new Date(),
     stake: opponent.stake,
+    isBattle,
     meta: {
       [user.uid]: {
         username: user.username,
@@ -110,6 +127,8 @@ export const handleGameRequestAccepted = async ({
     },
   };
 
+  console.log(JSON.stringify(gameState));
+
   // Update player-game mappings
   playerGameMap.set(user.uid, gameId);
   playerGameMap.set(opponent.uid, gameId);
@@ -118,11 +137,12 @@ export const handleGameRequestAccepted = async ({
   const response = {
     type: WebSocketMessageType.GAME_REQUEST_ACCEPTED,
     data: {
-      gameId,
       gameState,
     },
   };
 
   fromPlayer.ws.send(JSON.stringify(response));
   toPlayer.ws.send(JSON.stringify(response));
+
+  await updateBattleStatusByRequestId(requestId, 'ONGOING');
 };

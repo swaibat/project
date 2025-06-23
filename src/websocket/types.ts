@@ -20,7 +20,8 @@ export interface GameRequest {
   opponent: PlayerInfo;
   stake: GameStake;
   timestamp: number;
-  timeout: NodeJS.Timeout | null;
+  isBattle?: boolean;
+  timeout?: NodeJS.Timeout | null;
 }
 
 export enum Suit {
@@ -55,6 +56,7 @@ export interface GameState {
   moveTimeout?: NodeJS.Timeout | null;
   stake: GameStake;
   activePenaltyCount?: number;
+  isBattle?: boolean;
   meta: {
     [uid: string]: {
       username: string;
@@ -88,10 +90,39 @@ export interface MoveData {
   newSuit?: string;
 }
 
+// {
+//   requestId,
+//   user,
+//   opponent,
+//   stake,
+//   expiresAt: Date.now() + 10000,
+// }
+
+export interface RequestData {
+  requestId: string;
+  user: PlayerInfo;
+  opponent: PlayerInfo;
+  stake: GameStake;
+  expiresAt: number;
+  isBattle?: boolean;
+}
+
+export interface WsRequestProps {
+  ws: WebSocket;
+  data: RequestData;
+}
+
 export interface WsProps {
   ws: WebSocket;
-  data: MoveData;
+  data: MoveData | RequestData;
 }
+
+export type UpdateStakePayload = {
+  winnerUser?: PlayerInfo;
+  loserUser?: PlayerInfo;
+  stake: number;
+};
+
 
 export type ClientsMap = Map<string, PlayerData>;
 export type PendingRequestsMap = Map<string, GameRequest>;

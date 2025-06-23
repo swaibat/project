@@ -1,8 +1,15 @@
 import { WebSocket } from 'ws';
 import { broadcastOnlineUsers } from './handlers/broadcastOnlineUsers';
 import { clients, gameStates, PLAY_TIMEOUT_DURATION } from './state';
-import { ClientsMap, PlayerData } from './types';
+import {
+  ClientsMap,
+  PlayerData,
+  PlayerInfo,
+  UpdateStakePayload,
+} from './types';
 import { endGame } from './handlers/endGame';
+import User from '../models/User';
+import Prize from '../models/Prize';
 
 interface GameRequest {
   from: string;
@@ -138,4 +145,19 @@ export const startTimeout = (gameId: string) => {
   }
 
   gameStates.set(gameId, gameState); // Update state
+};
+
+export const validateNewStake = async (balance: number) => {
+  const prizeConfig = await Prize.findOne(); // adjust query if needed
+  if (!prizeConfig) return null;
+
+  const levels = prizeConfig.levels;
+  // Sort from highest to lowest stake level
+  const sortedLevels = [...levels].sort(
+    (a, b) => b.amount + b.charge - (a.amount + a.charge),
+  );
+
+  return (
+    sortedLevels.find((level) => balance >= level.amount + level.charge) || null
+  );
 };

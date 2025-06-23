@@ -6,7 +6,7 @@ export async function sendPushNotification(userId, title, body, data = {}) {
     // 1. Find user by custom `uid` field (not _id)
     const user = await User.findOne({ uid: userId });
 
-    console.log('user', user, userId);
+    console.log('user', data);
 
     if (!user || !user.fcmToken) {
       throw new Error('User not found or FCM token missing');

@@ -2,8 +2,8 @@
 import User from '../models/User';
 import { sendPushNotification } from '../utils/pushNotifications';
 
-const BONUS_INTERVAL_MS = 1000; // 5 hours
-const MAX_BONUS_COINS = 1;
+const BONUS_INTERVAL_MS = 60 * 1000; // ✅ 1 minute
+const MAX_BONUS_COINS = 4;
 
 export const processBonusUpdates = async (req) => {
   const now = Date.now();
@@ -13,10 +13,10 @@ export const processBonusUpdates = async (req) => {
   const users = await User.find({
     bonusCoins: { $lt: MAX_BONUS_COINS },
     lastBonusTime: { $lte: thresholdTime },
-    fcmToken: { $exists: true, $ne: null }, // make sure they can receive push
+    fcmToken: { $exists: true, $ne: null },
   });
 
-  console.log('users==', users);
+  console.log('Eligible users:', users.map(u => u.uid));
 
   for (const user of users) {
     let lastBonus = user.lastBonusTime ? user.lastBonusTime.getTime() : 0;
@@ -32,12 +32,12 @@ export const processBonusUpdates = async (req) => {
       lastBonus += BONUS_INTERVAL_MS;
     }
 
-    if (coinsAdded >= 0) {
+    if (coinsAdded > 0) {
       user.bonusCoins = bonusCoins;
       user.lastBonusTime = new Date(lastBonus);
       await user.save();
 
-      // Send socket.io event if user is connected
+      // Optional: Notify via socket if online
       if (req && typeof req.sendToUser === 'function') {
         req.sendToUser(user.uid, {
           type: 'BONUS_UPDATE',
@@ -48,12 +48,14 @@ export const processBonusUpdates = async (req) => {
         });
       }
 
+      // Optional: Push notification
       await sendPushNotification(
         user.uid,
-        `💰 You've Got Bonus Coin!`,
-        `You've earned 25 bonus coins! Tap to claim now!`,
+        `✨ You've Got Bonus Life!`,
+        `You've earned 1 bonus life! Don't let it go to waste!`,
         { type: 'BONUS_AVAILABLE' },
       );
     }
   }
 };
+           

@@ -22,13 +22,15 @@ export const handleIdentify = async ({
 }: HandleIdentifyProps): Promise<void> => {
   const { uid, username, balance, stake, avatar } = data;
 
+  console.log('====stake====', stake);
+
   const playerData = { ws, username, balance, stake, avatar, uid };
 
   const gameId = playerGameMap.get(uid);
   // Reconnection case
   if (playerGameMap.has(uid) && gameId) {
     const oldGameState = gameStates.get(gameId);
-    const { waitTimeout, moveTimeout, ...gameState } = oldGameState;
+    const { ...gameState } = oldGameState;
 
     if (gameState) {
       const now = Date.now();
@@ -48,7 +50,6 @@ export const handleIdentify = async ({
           ws,
           username,
           balance,
-          stake,
           avatar,
           uid,
         });
@@ -65,11 +66,12 @@ export const handleIdentify = async ({
         return;
       } else {
         // Game is valid, proceed with reconnection
+        const { moveTimeout, waitTimeout, newGameState } = gameState;
         sendToClient({
           ws,
           message: {
             type: WebSocketMessageType.IDENTIFY,
-            data: { gameState },
+            data: { gameState: newGameState },
           },
         });
 

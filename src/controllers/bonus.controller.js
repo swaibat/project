@@ -3,13 +3,16 @@ import User from '../models/User';
 export const updateBonusCoins = async (user) => {
   const now = Date.now();
   let lastBonus = user.lastBonusTime ? user.lastBonusTime.getTime() : 0;
-
   let bonusCoins = user.bonusCoins || 0;
 
-  // Keep adding coins if enough time has passed and bonus is less than 4
-  while (now - lastBonus >= 5 * 60 * 60 * 1000 && bonusCoins < 25) {
-    bonusCoins += 25;
-    lastBonus += 5 * 60 * 60 * 1000; // Add 5 hours to last bonus time
+  // 1 coin per minute, max 4
+  const BONUS_INTERVAL = 1 * 60 * 1000; // 1 minute in ms
+  const MAX_BONUS = 4;
+
+  // Add coins if enough time has passed
+  while (now - lastBonus >= BONUS_INTERVAL && bonusCoins < MAX_BONUS) {
+    bonusCoins += 1;
+    lastBonus += BONUS_INTERVAL;
   }
 
   if (bonusCoins !== user.bonusCoins) {
@@ -19,16 +22,13 @@ export const updateBonusCoins = async (user) => {
   }
 
   const nextBonusIn =
-    bonusCoins >= 25
+    bonusCoins >= MAX_BONUS
       ? null
-      : Math.max(
-          0,
-          (5 * 60 * 60 * 1000 - (now - lastBonus)) / (1000 * 60 * 60),
-        ); // in hours
+      : Math.max(0, BONUS_INTERVAL - (now - lastBonus)); // in ms
 
   return {
     bonusCoins: user.bonusCoins,
-    nextBonusIn, // hours left to next bonus (null if max coins)
+    nextBonusIn: nextBonusIn ? Math.ceil(nextBonusIn / 1000) : null, // in seconds
   };
 };
 

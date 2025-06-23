@@ -1,7 +1,9 @@
+import { log } from 'node:console';
 import User from '../../models/User';
 import { WebSocketMessageType } from '../../types/messageTypes';
-import { clients, gameStates, playerGameMap, } from '../state';
+import { clients, gameStates, playerGameMap } from '../state';
 import { handleNearbyPlayers } from './handleNearbyPlayers';
+import { validateNewStake } from '../wsUtil';
 
 interface EndGameProps {
   gameId: string;
@@ -23,8 +25,8 @@ export const endGame = async ({
   console.log('GAME_OVER 0000');
   if (!gameState) return;
 
-  playerGameMap.delete(winner)
-  playerGameMap.delete(loser!)
+  playerGameMap.delete(winner);
+  playerGameMap.delete(loser!);
 
   // Clear timeout if exists
   if (gameState.moveTimeout) {
@@ -41,6 +43,8 @@ export const endGame = async ({
   const { charge = 0, amount = 0, points = 0 } = gameState.stake || {};
   handleNearbyPlayers(winner);
   handleNearbyPlayers(loser!);
+
+  let loserStake = null;
 
   // Update balances
   try {
@@ -68,6 +72,7 @@ export const endGame = async ({
       loserUser.winRate = Math.round(
         (loserUser.gamesWon / loserUser.gamesPlayed) * 100,
       );
+      loserStake = await validateNewStake(loserUser.balance);
       loserUser.lastPlayed = new Date();
       await loserUser.save();
     }
@@ -81,13 +86,20 @@ export const endGame = async ({
     loser,
     reason,
     stake: gameState.stake,
+    loserStake,
     ...additionalData,
   };
 
   const allPlayers = Object.keys(gameState.players);
   allPlayers.forEach((playerId) => {
-    const client = clients.get(playerId);
+    let client = clients.get(playerId);
+
     if (client) {
+      // client.balance = user.balance;
+      client.stake = gameState.stake;
+
+      // console.log('client=====',gameState.stake, client)
+
       client.ws.send(
         JSON.stringify({
           type: WebSocketMessageType.GAME_OVER,
@@ -96,6 +108,8 @@ export const endGame = async ({
       );
     }
   });
+
+  // await broadcastOnlineUsers();
 
   // Clean up game state
   setTimeout(() => {

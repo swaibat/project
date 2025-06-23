@@ -6,7 +6,7 @@ export type PublicPlayerData = Omit<PlayerData, 'ws'>;
 
 interface BroadcastMessage {
   type: keyof typeof WebSocketMessageType;
-  users: PublicPlayerData[];
+  data: PublicPlayerData[];
 }
 
 // Implementation
@@ -21,9 +21,13 @@ export const broadcastOnlineUsers = async (): Promise<void> => {
       stake,
     }));
 
+    console.log('====================================');
+    console.log(onlineUsers);
+    console.log('====================================');
+
   const message: string = JSON.stringify({
     type: WebSocketMessageType.ONLINE_USERS,
-    users: onlineUsers,
+    data: onlineUsers,
   } as BroadcastMessage);
 
   // Send to all connected clients

@@ -16,7 +16,7 @@ const rewardItemSchema = new mongoose.Schema({
 });
 
 const rewardsListItemSchema = new mongoose.Schema({
-  stake: {
+  amount: {
     type: Number,
     required: true,
   },
@@ -48,10 +48,10 @@ const prizeSchema = new mongoose.Schema({
   levels: {
     type: [rewardsListItemSchema],
     default: [
-      { stake: 200, charge: 25, points: 1, name: 'Amateur Grounds' },
-      { stake: 500, charge: 25, points: 2, name: 'Royal Ramble' },
-      { stake: 1000, charge: 50, points: 5, name: 'Summer Slam' },
-      { stake: 2000, charge: 100, points: 10, name: 'Jockers Gambit' },
+      { amount: 200, charge: 25, points: 1, name: 'Amateur Grounds' },
+      { amount: 500, charge: 25, points: 2, name: 'Royal Ramble' },
+      { amount: 1000, charge: 50, points: 5, name: 'Summer Slam' },
+      { amount: 2000, charge: 100, points: 10, name: 'Jockers Gambit' },
     ],
   },
 });
